@@ -244,7 +244,7 @@ const KND = (() => {
   const isZero = v => v.every(x => Math.abs(x) < 0.5);
   const eqVec = (a, b) => a.every((x, i) => Math.abs(x - b[i]) <= Math.max(1.5, Math.abs(x) * 1e-7));
   const STOP = new Set(['de', 'da', 'do', 'das', 'dos', 'com', 'sobre', 'sem', 'para', 'e', 'a', 'o', 'em', 'c', 's']);
-  const toks = s => new Set(norm(s).split(' ').filter(t => t.length > 1 && !STOP.has(t)).map(t => t.length > 4 && t.endsWith('s') ? t.slice(0, -1) : t));
+  const toks = s => new Set(norm(String(s).replace(/(\d)\s*[ºª°o]\b/gi, '$1')).split(' ').filter(t => t.length > 1 && !STOP.has(t)).map(t => t.length > 4 && t.endsWith('s') ? t.slice(0, -1) : t));
   function similar(a, b) {
     const A = toks(a), B = toks(b);
     if (!A.size || !B.size) return 0;
@@ -843,7 +843,7 @@ const KND = (() => {
       const m = /(20\d{2})/.exec(fonte.caixa.arquivo); if (m) return +m[1];
       const hy = Object.keys(hist.caixa).map(Number); return hy.length ? Math.max(...hy) + 1 : new Date().getFullYear();
     })();
-    const histYears = Object.keys(hist.caixa).map(Number).filter(y => y < anoCorrente).sort();
+    const histYears = Object.keys(hist.caixa).map(Number).filter(y => y < anoCorrente).sort().slice(-2); // comparativo: os 2 anos anteriores
     const years = histYears.concat([anoCorrente]);
     const ent = cur.n1.ENT ? cur.n1.ENT.v : zeros(12);
     let ref = 11; while (ref > 0 && Math.abs(ent[ref]) < 0.5) ref--;
@@ -869,19 +869,27 @@ const KND = (() => {
           const paiC = c => c.path.length ? c.path[c.path.length - 1].name : '';
           const mesmoPai = c => norm(paiC(c)) === norm(paiH) || similar(paiC(c), paiH) >= 0.5;
           const fuzzy = (lista, min) => { let best = min, a = null; lista.forEach(c => { const s = similar(c.node.name, hl.name); if (s >= best) { best = s; a = c; } }); return a; };
-          let alvo = curLeaves.find(c => !c.node.ajuste && norm(c.node.name) === norm(hl.name));
-          if (!alvo && hl.code) alvo = curLeaves.find(c => c.node.code === hl.code && mesmoPai(c) && similar(c.node.name, hl.name) >= 0.2);
-          if (!alvo) alvo = fuzzy(curLeaves.filter(mesmoPai), 0.5);
-          if (!alvo && hl.code) alvo = curLeaves.find(c => c.node.code === hl.code && mesmoPai(c));
-          if (!alvo) alvo = fuzzy(curLeaves, 0.6);
+          const orig = curLeaves.filter(c => !c.node.soHistorico && !c.node.ajuste);
+          let alvo = orig.find(c => norm(c.node.name) === norm(hl.name));
+          if (!alvo && hl.code) alvo = orig.find(c => c.node.code === hl.code && mesmoPai(c) && similar(c.node.name, hl.name) >= 0.2);
+          if (!alvo) alvo = fuzzy(orig.filter(mesmoPai), 0.5);
+          if (!alvo && hl.code) alvo = orig.find(c => c.node.code === hl.code && mesmoPai(c));
+          if (!alvo && hl.code) alvo = orig.find(c => c.node.code === hl.code && similar(c.node.name, hl.name) >= 0.2);
+          if (!alvo) alvo = fuzzy(orig, 0.5);
+          if (!alvo) alvo = curLeaves.find(c => c.node.soHistorico && norm(c.node.name) === norm(hl.name));
           if (alvo) { alvo.node.y[y] = add(alvo.node.y[y], hl.v); continue; }
           // conta só existe no histórico: entra no grupo de mesmo nome
           const pai = path.length ? path[path.length - 1] : null;
           let grupo = pai && headersOf(model.kids[k]).find(h => norm(h.name) === norm(pai.name) || similar(h.name, pai.name) >= 0.5);
           const nova = { id: 'n' + (++uid), name: hl.name, code: hl.code, kids: null, soHistorico: true };
           attachYears(nova, years); nova.y[y] = hl.v.slice();
-          if (grupo) grupo.kids.push(nova); else (model.kids[k] = model.kids[k] || []).push(nova);
-          curLeaves.push({ node: nova, path: grupo ? [grupo] : [] });
+          if (!grupo) {
+            const lista = model.kids[k] = model.kids[k] || [];
+            grupo = lista.find(n => n.outras);
+            if (!grupo) { grupo = { id: 'n' + (++uid), name: 'Outras contas (só em anos anteriores)', code: '', kids: [], header: true, outras: true }; attachYears(grupo, years); lista.push(grupo); }
+          }
+          grupo.kids.push(nova);
+          curLeaves.push({ node: nova, path: [grupo] });
         }
       }
     }
@@ -915,7 +923,7 @@ const KND = (() => {
     if (!fonte.faturamento) return null;
     const f = readFaturamento(fonte.faturamento.grid);
     const cats = ['Nacional', 'Serviço', 'Exportação', 'Sucata', 'Imobilizado', 'Aluguel', 'Ressarcimento', 'Devolução', 'Intercompany'];
-    const histYears = Object.keys(hist.fat).map(Number).filter(y => y < anoCorrente).sort();
+    const histYears = Object.keys(hist.fat).map(Number).filter(y => y < anoCorrente).sort().slice(-2);
     const years = histYears.concat([anoCorrente]);
     const m = { years, cur: anoCorrente, ref, cats: {}, detalhe: {}, blocos: f.blocos, analiticos: f.analiticos, semCategoria: [], orc: {} };
     cats.forEach(c => { m.cats[c] = {}; years.forEach(y => m.cats[c][y] = zeros(12)); m.detalhe[c] = []; });
