@@ -128,7 +128,7 @@ svg .vl{font-size:10.5px;font-weight:700;fill:var(--ink)}
 .cfoto .logo{position:absolute;left:50px;top:200px;font-size:84px;font-weight:800}.cfoto .logo span{color:#6EC6F0}
 .cper{position:absolute;left:44px;bottom:40px;display:flex;flex-direction:column;gap:4px}.cper b{font-size:20px;letter-spacing:.06em}.cper span{opacity:.85;font-size:14px}
 .clogos{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:34px;padding:40px}.clogos img{max-width:320px;max-height:110px;object-fit:contain}.clogos h1{color:var(--verde);text-align:center}
-.opr-logo{position:absolute;right:34px;bottom:44px;height:46px}
+.opr-logo{position:absolute;right:34px;top:96px;height:26px;opacity:.9}
 #pctrl{display:none}
 body.apresentando{background:#1a211d}
 body.apresentando .top,body.apresentando aside,body.apresentando #drop{display:none!important}
@@ -219,11 +219,12 @@ body.apresentando main{padding-bottom:60px}
 </div>
 <div id="copilot">
   <div style="display:flex;justify-content:space-between;align-items:center"><h3>Análise do agente KND</h3><button class="bt" id="cp-fechar">Fechar</button></div>
+  <div style="display:flex;gap:8px"><button class="bt pri" id="cp-copiar">1. Copiar dados</button><button class="bt ia" id="cp-abrir">2. Abrir agente</button></div>
   <p id="cp-aviso" class="cp-aviso">Clique em <b>✦ Gerar análise</b>: os números, o contexto e as pendências são copiados e o agente abre numa nova aba.</p>
   <textarea id="cp-resposta" placeholder="Cole aqui a resposta do agente…"></textarea>
   <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span id="cp-msg"></span><button class="bt pri" id="cp-aplicar">Aplicar ao relatório</button></div>
   <details class="cp-det"><summary>Ver o que foi enviado ao agente <span id="cp-count"></span></summary>
-    <div style="display:flex;justify-content:flex-end;margin:6px 0"><button class="bt mini" id="cp-copiar">Copiar de novo</button><a href="#" id="cp-ver" style="display:none"></a></div>
+    <a href="#" id="cp-ver" style="display:none"></a>
     <textarea id="cp-pacote" readonly></textarea></details>
 </div>
 <div id="tip"></div>
@@ -1355,21 +1356,54 @@ if (typeof module !== 'undefined') module.exports = Charts;
   }
   function sOPR() {
     const L = oprBlocos(), m = M();
-    const box = (k, ico, t) => `<div class="opr-b"><h4><span>${ico}</span>${esc(t)}</h4>${editavel('opr-' + k, `<ul>${L[k].map(x => `<li>${x}</li>`).join('')}${iaLinhas(k)}${!L[k].length && !ST.copilot[k] ? '<li class="ph">Aguardando o Copilot (marcador [' + k + ']).</li>' : ''}</ul>`)}</div>`;
+    const box = (k, ico, t) => `<div class="opr-b"><h4><span>${ico}</span>${esc(t)}</h4>${editavel('opr-' + k, `<ul>${L[k].map(x => `<li>${x}</li>`).join('')}${iaLinhas(k)}${k === 'FOCO' && !ST.copilot.FOCO ? autoFoco().map(x => `<li>${x}</li>`).join('') : ''}</ul>`)}</div>`;
     const corpo = `<div class="opr">
       ${box('MANCHETE', '📌', 'Headline mês')}${box('RECEITA', '💰', 'Receita')}
       ${box('CUSTOS_MARGEM', '📉', 'Custos e margem (DRE)')}${box('RESULTADO', '📊', 'Resultado')}
       ${box('CAIXA', '💧', 'Caixa')}${box('FOCO', '⚠️', 'Foco diretoria ' + m.ano)}</div>
       ${(() => { const pd = pendencias().filter(x => !/contexto/.test(x)); const ia = (ST.copilot.PENDENCIAS || '').replace(/^[-•*]\s*/gm, '').trim(); const txt = pd.length ? `Análise parcial – documentos ausentes: ${pd.join(', ')}.` : (ia && !/^nenhum/i.test(ia) ? ia : ''); return txt ? `<p class="pend">⚠ ${esc(txt)}</p>` : ''; })()}
-      <p class="hint no-print">Números em negrito: cálculo automático. Demais tópicos: agente KND (Copilot). Tudo pode ser editado clicando no texto.</p>${ST.logos.cliente[0] ? `<img class="opr-logo" src="${ST.logos.cliente[0].src}" alt="">` : ''}`;
+      <p class="hint no-print">Textos automáticos a partir dos números; ao aplicar a análise do agente KND, ela entra no lugar. Tudo pode ser editado clicando no texto.</p>`;
     return slide('opr', 'Abertura', `OPR – Resultados ${MESES[m.ref]} ${m.ano}${m.cliente ? ' | ' + m.cliente : ''}`, corpo, { tag: 'One Page Report' });
   }
+  // ---- textos automáticos (usados enquanto o agente não responde; a resposta do agente substitui)
+  function categoriasOrc() {
+    const o = M().orc, r = M().ref, out = []; if (!o) return out;
+    ['VAR', 'FIX', 'FIN', 'PS'].forEach(k => (o.kids[k] || []).filter(g => g.kids).forEach(g => {
+      const mm = menorMelhorOrc(k, g), s = mm ? -1 : 1, d = s * (sumTo(g.real, r) - sumTo(g.orc, r));
+      let gestor = '', pior = 0;
+      KND.leaves(g.kids).forEach(({ node: n }) => { const dd = s * (sumTo(n.real, r) - sumTo(n.orc, r)); if (n.gestor && dd < pior) { pior = dd; gestor = n.gestor; } });
+      out.push({ nome: g.name, d, p: pct(sumTo(g.real, r), sumTo(g.orc, r)), gestor });
+    }));
+    return out;
+  }
+  function autoPositivos() {
+    const m = M(), r = m.ref, L = [], o = m.orc, bk = m.bancos;
+    if (o && o.n1.ENT) { const a = sumTo(o.n1.ENT.orc, r), re = sumTo(o.n1.ENT.real, r); if (re > a) L.push(`Receita acumulada ${b(fmtP(pct(re, a)))} acima do orçado (${fmtC(re)})`); }
+    if (m.fat && m.fat.orc) {
+      const cats = ['Nacional', 'Serviço', 'Exportação'].map(k => ({ k, re: sumTo(m.fat.cats[k][m.ano], r), or: sumTo(m.fat.orc[k] || zeros(12), r) })).filter(x => x.or > 0.5 && x.re > x.or).sort((x, y) => (y.re - y.or) - (x.re - x.or));
+      if (cats[0]) L.push(`${cats[0].k === 'Nacional' ? 'Mercado interno' : cats[0].k}: ${b('+' + fmtC(cats[0].re - cats[0].or))} acima do orçado no ano`);
+    }
+    categoriasOrc().filter(x => x.d > ST.materialidade).sort((x, y) => y.d - x.d).slice(0, 2).forEach(x => L.push(`${esc(x.nome)}: ${b(fmtC(x.d))} melhor que o orçado (${fmtP(x.p)})`));
+    if (bk) { const va = bk.total.fim[r] - bk.total.ini[0]; if (va > 0) L.push(`Saldo bancário cresceu ${b(fmtC(va))} no ano (${fmtP(pct(bk.total.fim[r], bk.total.ini[0]))})`); }
+    return L.slice(0, 4);
+  }
+  function autoOfensores() {
+    const m = M(), r = m.ref, L = [], bk = m.bancos;
+    categoriasOrc().filter(x => x.d < -ST.materialidade).sort((x, y) => x.d - y.d).slice(0, 3).forEach(x => L.push(`${esc(x.nome)}: ${b(fmtC(-x.d))} acima do orçado (${fmtP(x.p)})${x.gestor ? ` · ${esc(x.gestor)}` : ''}`));
+    if (m.caixa) { const mv = movimentos(); const top = (mv.up || []).find(x => x.k !== 'PS' && !L.some(l => l.startsWith(esc(x.grupo)))); if (top && L.length < 4) { const pp = pct(top.atual, top.ant); L.push(`${esc(top.nome)}: ${b('+' + fmtC(top.d))} vs ${mv.p} no caixa${pp != null ? ` (${fmtP(pp)})` : ''}`); } }
+    if (bk && L.length < 4) { const vm = bk.total.fim[r] - bk.total.ini[r]; if (vm < 0) L.push(`Caixa caiu ${b(fmtC(-vm))} no mês (${fmtP(pct(bk.total.fim[r], bk.total.ini[r]))})`); }
+    return L.slice(0, 4);
+  }
+  function autoFoco() {
+    return categoriasOrc().filter(x => x.d < -ST.materialidade).sort((x, y) => x.d - y.d).slice(0, 3)
+      .map(x => `Revisar ${esc(x.nome.toLowerCase())}${x.gestor ? ` com ${esc(x.gestor)}` : ''}: ${b(fmtC(-x.d))} acima do orçado no acumulado`);
+  }
   function sDestaques() {
-    const ph = k => ST.copilot[k] ? `<ul>${iaLinhas(k)}</ul>` : `<p class="ph">Aguardando análise do Copilot (marcador [${k}]).</p>`;
+    const lista = (k, auto) => ST.copilot[k] ? `<ul>${iaLinhas(k)}</ul>` : `<ul>${auto.map(x => `<li>${x}</li>`).join('')}</ul>`;
     return slide('destaques', 'Abertura', 'Destaques do mês', `<div class="dest">
-      <div class="iabox pos"><h4>O que performou bem</h4>${editavel('dest-POS', ph('POSITIVOS'))}</div>
-      <div class="iabox neg"><h4>Ofensores</h4>${editavel('dest-NEG', ph('OFENSORES'))}</div></div>
-      <div class="auto"><h4>Variações calculadas (acumulado vs ano anterior)</h4>${tabelaMovimentos()}</div>`, { tag: 'Textos: Copilot · Tabela: cálculo automático' });
+      <div class="iabox pos"><h4>O que performou bem</h4>${editavel('dest-POS', lista('POSITIVOS', autoPositivos()))}</div>
+      <div class="iabox neg"><h4>Ofensores</h4>${editavel('dest-NEG', lista('OFENSORES', autoOfensores()))}</div></div>
+      <div class="auto"><h4>Variações calculadas (acumulado vs ano anterior)</h4>${tabelaMovimentos()}</div>`, { tag: 'Destaques' });
   }
 
   // ------------------------------------------------------------------ análises reaproveitadas (slides e Copilot)
@@ -1822,29 +1856,8 @@ if (typeof module !== 'undefined') module.exports = Charts;
     if (m.bancos) { const t = m.bancos.total; L.push(`\n[SALDO BANCÁRIO] 01/01: ${n(t.ini[0])} | fim de ${MES3[r]}: ${n(t.fim[r])} | início de ${MES3[r]}: ${n(t.ini[r])}`); }
     return L.join('\n');
   }
-  const PROMPT = `Você é analista financeiro sênior da KND Consultoria. Escreva a análise do fechamento mensal do cliente a partir SOMENTE dos dados abaixo.
-Os números principais (receita, margens, resultado, caixa) já entram automaticamente no relatório. Seu papel é a LEITURA: o que explica os números, o que chama atenção e o que fazer.
-Se houver CONTEXTO DO CONSULTOR, use-o para explicar as variações relacionadas (ex.: um evento que pressionou certas contas) e conecte o contexto aos números afetados.
-Regras: não invente números nem causas que não estejam nos dados ou no contexto; ao citar valores, use exatamente os dos dados; português do Brasil, tom executivo; cada tópico com no máximo 20 palavras, começando com "- ".
-Responda EXATAMENTE neste formato, com os marcadores entre colchetes, nesta ordem e sem nenhum texto fora deles:
-[MANCHETE]
-- 1 a 2 tópicos com o principal do mês
-[RECEITA]
-- 1 a 2 tópicos de leitura
-[CUSTOS_MARGEM]
-- 1 a 2 tópicos de leitura
-[RESULTADO]
-- 1 a 2 tópicos de leitura
-[CAIXA]
-- 1 a 2 tópicos de leitura
-[FOCO]
-- 3 a 4 recomendações para a diretoria
-[POSITIVOS]
-- 3 a 4 tópicos curtos
-[OFENSORES]
-- 3 a 4 tópicos curtos
-[PENDENCIAS]
-- se houver PENDÊNCIAS DE DOCUMENTOS, 1 tópico dizendo o que ficou parcial; se não houver, escreva "- Nenhuma"
+  // As regras completas ficam nas instruções do agente KND; aqui vai só um cabeçalho curto (sobra espaço para o contexto)
+  const PROMPT = `Você é analista financeiro sênior da KND. Gere a análise da RAR no formato padrão, com os marcadores [MANCHETE] [RECEITA] [CUSTOS_MARGEM] [RESULTADO] [CAIXA] [FOCO] [POSITIVOS] [OFENSORES] [PENDENCIAS], usando somente os DADOS abaixo e o contexto do consultor. Não recalcule números.
 
 DADOS:
 `;
@@ -1858,15 +1871,30 @@ DADOS:
     atualizarPacote();
     $('#copilot').classList.add('on');
   }
-  async function gerarAnalise() {
+  // cópia robusta: primeiro o método clássico (funciona em todos os navegadores, inclusive arquivo local), depois a API moderna
+  function copiarTexto(txt) {
+    let ok = false;
+    const ta = document.createElement('textarea');
+    ta.value = txt; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;width:2px;height:2px;opacity:0';
+    document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, txt.length);
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => { }, () => { });
+    return ok;
+  }
+  function gerarAnalise() {
     if (!ST.M || !ST.M.caixa) return alert('Carregue os arquivos do mês primeiro.');
     const txt = PROMPT + pacote();
     atualizarPacote();
-    try { await navigator.clipboard.writeText(txt); } catch (e) { const t = $('#cp-pacote'); t.select(); document.execCommand('copy'); }
-    window.open(AGENTE_URL || AGENTE_PADRAO, '_blank', 'noopener');
+    const ok = copiarTexto(txt);
     $('#copilot').classList.add('on');
     $('#cp-msg').textContent = '';
-    $('#cp-aviso').innerHTML = `<b>✓ Dados copiados.</b> No agente que abriu, aperte <b>Ctrl+V</b> e <b>Enter</b>. Quando ele responder, copie a resposta inteira e cole aqui embaixo.`;
+    if (ok) {
+      window.open(AGENTE_URL || AGENTE_PADRAO, '_blank', 'noopener');
+      $('#cp-aviso').innerHTML = `<b>✓ Dados copiados (${txt.length.toLocaleString('pt-BR')} caracteres).</b> No agente que abriu, aperte <b>Ctrl+V</b> e <b>Enter</b>. O texto colado deve começar com "Você é analista financeiro sênior da KND". Depois copie a resposta do agente e cole aqui embaixo.`;
+    } else {
+      $('#cp-aviso').innerHTML = `<b>O navegador não deixou copiar automaticamente.</b> Clique em <b>Copiar dados</b> abaixo e depois em <b>Abrir agente</b>.`;
+    }
     setTimeout(() => $('#cp-resposta').focus(), 300);
   }
   function aplicarResposta(txt) {
@@ -2036,7 +2064,8 @@ DADOS:
     $('#btn-copilot').onclick = gerarAnalise;
     $('#cp-ver').onclick = e => { e.preventDefault(); $('#cp-pacote').classList.toggle('show'); };
     $('#cp-fechar').onclick = () => $('#copilot').classList.remove('on');
-    $('#cp-copiar').onclick = async () => { const t = $('#cp-pacote'); t.select(); try { await navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } $('#cp-copiar').textContent = 'Copiado ✓'; setTimeout(() => $('#cp-copiar').textContent = 'Copiar para o Copilot', 1800); };
+    $('#cp-copiar').onclick = () => { atualizarPacote(); const ok = copiarTexto($('#cp-pacote').value); $('#cp-copiar').textContent = ok ? 'Copiado ✓' : 'Não copiou – selecione o texto abaixo e use Ctrl+C'; setTimeout(() => $('#cp-copiar').textContent = '1. Copiar dados', 2500); if (!ok) { const d = document.querySelector('.cp-det'); d.open = true; $('#cp-pacote').select(); } };
+    $('#cp-abrir').onclick = () => window.open(AGENTE_URL || AGENTE_PADRAO, '_blank', 'noopener');
     $('#cp-aplicar').onclick = () => { const n = aplicarResposta($('#cp-resposta').value); $('#cp-msg').textContent = n ? `✓ ${n} blocos aplicados ao OPR e aos Destaques. Pode fechar este painel.` : 'Não encontrei os marcadores [MANCHETE], [RECEITA]… na resposta.'; if (n) { rerenderKeep(); } };
     $('#btn-pdf').onclick = baixarPDF;
     // ditado do contexto: Chrome, Edge e Safari usam o reconhecimento de voz do navegador;
