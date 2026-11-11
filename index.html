@@ -146,6 +146,13 @@ body.apresentando .tb th{top:0}
 .drill tr[data-tgb]{cursor:pointer}.drill tr[data-tgb]:hover td{background:#f0f7fc}.voltar{color:var(--verde2);text-decoration:none;font-weight:600}
 body.apresentando main{padding-bottom:60px}
 @media print{.voltar{display:none}}
+.ctx-side{width:100%;min-height:96px;border:1px solid var(--linha);border-radius:8px;padding:7px;font:12.5px/1.4 inherit;resize:vertical}
+.cp-aviso{background:var(--claro);border-radius:8px;padding:10px 12px;font-size:13.5px;line-height:1.45;margin:0}
+.cp-det summary{cursor:pointer;font-size:12.5px;color:var(--ink2)}.cp-det textarea{min-height:200px;width:100%}
+#copilot #cp-resposta{flex:1;min-height:220px}
+.pend{margin:12px 10px 0;display:inline-block;font-size:12.5px;color:#8a5a00;background:#fff6e0;border-radius:6px;padding:5px 10px;max-width:70%}
+.mic{margin:0 0 6px;width:100%}.mic.on{background:#B5473A;border-color:#B5473A;color:#fff;animation:pulsa 1.2s infinite}
+@keyframes pulsa{50%{opacity:.7}}
 /* ---------- impressão / PDF ---------- */
 @media print{
   @page{size:A4 landscape;margin:0}
@@ -165,7 +172,7 @@ body.apresentando main{padding-bottom:60px}
   <label class="bt pri">Carregar arquivos<input id="arquivos" type="file" accept=".xlsx,.xlsm,.png,.jpg,.jpeg,.svg,.webp" multiple hidden></label>
   <button class="bt so-pronto" id="btn-abrir">Abrir todas as contas</button>
   <button class="bt so-pronto" id="btn-fechar">Fechar contas</button>
-  <button class="bt ia so-pronto" id="btn-copilot">Análise com Copilot</button>
+  <button class="bt ia so-pronto" id="btn-copilot">✦ Gerar análise (agente KND)</button>
   <button class="bt pri so-pronto" id="btn-apresentar">▶ Apresentar</button>
   <button class="bt so-pronto" id="btn-pdf">Baixar PDF (tudo aberto)</button>
   <button class="bt so-pronto" id="btn-hist">Baixar histórico atualizado</button>
@@ -177,6 +184,10 @@ body.apresentando main{padding-bottom:60px}
     <div class="cfg"><label>Nome<input id="cfg-cliente" type="text" placeholder="Nome do cliente" style="width:150px;text-align:left"></label>
     <label>Logomarca<span><label class="bt mini">Escolher<input class="in-logo" type="file" accept=".png,.jpg,.jpeg,.svg,.webp" multiple hidden></label> <button class="bt mini" id="logo-limpar">Tirar</button></span></label>
     <div id="logo-prev" class="logo-prev"></div></div>
+    <h5>Contexto do mês <small id="ctx-n" style="float:right;font-weight:400">0/1500</small></h5>
+    <button class="bt mini mic" id="btn-mic" type="button" title="Falar o contexto (o texto é transcrito no campo abaixo)">🎤 Falar o contexto</button>
+    <textarea id="ctx-side" maxlength="1500" class="ctx-side" placeholder="O que aconteceu no cliente neste mês? Ex.: puxada de produção por problemas com o MAPA; estamos adiantando estoque, o que eleva matéria-prima e embalagens."></textarea>
+    <p class="hint">Vai junto com os números para o agente KND explicar as variações.</p>
     <h5 class="so-pronto">Sumário</h5><nav id="indice"></nav>
     <p class="hint">Os arquivos são lidos só neste navegador. Nada é enviado para a internet.</p>
   </aside>
@@ -206,14 +217,13 @@ body.apresentando main{padding-bottom:60px}
   </main>
 </div>
 <div id="copilot">
-  <div style="display:flex;justify-content:space-between;align-items:center"><h3>Análise com Copilot</h3><button class="bt" id="cp-fechar">Fechar</button></div>
-  <label class="ctx-l"><b>Contexto do mês (informações do consultor)</b> <small id="cp-ctxn">0/1500</small></label>
-  <textarea id="cp-contexto" maxlength="1500" style="flex:0 0 96px;min-height:96px;font-family:inherit;font-size:13px" placeholder="Ex.: Puxada de produção por problemas com o MAPA: estamos adiantando estoque, o que eleva matéria-prima, embalagens e fretes de compra neste mês."></textarea>
-  <ol><li>Copie o texto abaixo (instruções + resumo dos números) e cole no Copilot.</li><li>Copie a resposta inteira do Copilot e cole no segundo campo.</li><li>Clique em "Aplicar": os textos vão para o One Page Report e para os Destaques.</li></ol>
-  <textarea id="cp-pacote" readonly></textarea>
-  <div style="display:flex;justify-content:space-between;align-items:center"><span id="cp-count"></span><button class="bt ia" id="cp-copiar">Copiar para o Copilot</button></div>
-  <textarea id="cp-resposta" placeholder="Cole aqui a resposta do Copilot…"></textarea>
-  <div style="display:flex;justify-content:space-between;align-items:center"><span id="cp-msg"></span><button class="bt pri" id="cp-aplicar">Aplicar</button></div>
+  <div style="display:flex;justify-content:space-between;align-items:center"><h3>Análise do agente KND</h3><button class="bt" id="cp-fechar">Fechar</button></div>
+  <p id="cp-aviso" class="cp-aviso">Clique em <b>✦ Gerar análise</b>: os números, o contexto e as pendências são copiados e o agente abre numa nova aba.</p>
+  <textarea id="cp-resposta" placeholder="Cole aqui a resposta do agente…"></textarea>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span id="cp-msg"></span><button class="bt pri" id="cp-aplicar">Aplicar ao relatório</button></div>
+  <details class="cp-det"><summary>Ver o que foi enviado ao agente <span id="cp-count"></span></summary>
+    <div style="display:flex;justify-content:flex-end;margin:6px 0"><button class="bt mini" id="cp-copiar">Copiar de novo</button><a href="#" id="cp-ver" style="display:none"></a></div>
+    <textarea id="cp-pacote" readonly></textarea></details>
 </div>
 <div id="tip"></div>
 <div id="pctrl"><button class="bt" id="pprev">‹</button><span id="pcont"></span><span id="ptit"></span><button class="bt" id="pnext">›</button><button class="bt" id="ppdf">PDF</button><button class="bt" id="psair">Sair (Esc)</button></div>
@@ -1215,6 +1225,9 @@ if (typeof module !== 'undefined') module.exports = Charts;
   const esc = Charts.esc;
   const $ = s => document.querySelector(s);
 
+  // Link do agente KND no Microsoft 365 Copilot (cole aqui quando o agente estiver publicado)
+  const AGENTE_URL = 'https://m365.cloud.microsoft/chat/?titleId=T_4adbd286-6630-f5c4-e3e3-ce7ec9053b83';
+  const AGENTE_PADRAO = 'https://m365.cloud.microsoft/chat';
   const ST = {
     fechado: new Set(), M: null, aberto: new Set(), fechado: new Set(), copilot: {}, fca: {}, notas: {}, edit: {},
     logos: { knd: (window.KND_ASSETS || {}).kndEscuro || '', kndBranco: (window.KND_ASSETS || {}).kndBranco || '', capa: (window.KND_ASSETS || {}).capa || '', cliente: [] },
@@ -1346,7 +1359,8 @@ if (typeof module !== 'undefined') module.exports = Charts;
       ${box('MANCHETE', '📌', 'Headline mês')}${box('RECEITA', '💰', 'Receita')}
       ${box('CUSTOS_MARGEM', '📉', 'Custos e margem (DRE)')}${box('RESULTADO', '📊', 'Resultado')}
       ${box('CAIXA', '💧', 'Caixa')}${box('FOCO', '⚠️', 'Foco diretoria ' + m.ano)}</div>
-      <p class="hint no-print">Números em negrito: cálculo automático. Demais tópicos: Copilot. Tudo pode ser editado clicando no texto.</p>${ST.logos.cliente[0] ? `<img class="opr-logo" src="${ST.logos.cliente[0].src}" alt="">` : ''}`;
+      ${(() => { const pd = pendencias().filter(x => !/contexto/.test(x)); const ia = (ST.copilot.PENDENCIAS || '').replace(/^[-•*]\s*/gm, '').trim(); const txt = pd.length ? `Análise parcial – documentos ausentes: ${pd.join(', ')}.` : (ia && !/^nenhum/i.test(ia) ? ia : ''); return txt ? `<p class="pend">⚠ ${esc(txt)}</p>` : ''; })()}
+      <p class="hint no-print">Números em negrito: cálculo automático. Demais tópicos: agente KND (Copilot). Tudo pode ser editado clicando no texto.</p>${ST.logos.cliente[0] ? `<img class="opr-logo" src="${ST.logos.cliente[0].src}" alt="">` : ''}`;
     return slide('opr', 'Abertura', `OPR – Resultados ${MESES[m.ref]} ${m.ano}${m.cliente ? ' | ' + m.cliente : ''}`, corpo, { tag: 'One Page Report' });
   }
   function sDestaques() {
@@ -1734,11 +1748,24 @@ if (typeof module !== 'undefined') module.exports = Charts;
   function rerenderKeep() { const y = window.scrollY; render(); if (!document.body.classList.contains('apresentando')) window.scrollTo(0, y); }
 
   // ------------------------------------------------------------------ COPILOT
+  function pendencias() {
+    const m = M(); if (!m) return [];
+    const p = [];
+    if (!m.caixa) p.push('DFC / caixa do mês');
+    if (!m.orc) p.push('competência (orçado × realizado)');
+    if (!m.fat) p.push('faturamento');
+    if (!m.bancos) p.push('saldos bancários');
+    if (m.caixa && m.caixa.years.length < 3) p.push(m.caixa.years.length < 2 ? 'histórico dos anos anteriores (base gráfica ou fechamentos)' : 'histórico do ano retrasado');
+    if (!(ST.contexto || '').trim()) p.push('contexto do mês informado pelo consultor');
+    return p;
+  }
   function pacote() {
     const m = M(), c = m.caixa, y = c.cur, ys = anos3(c.years), p = ys[ys.length - 2], r = m.ref;
     const L = []; const n = v => fmtC(v).replace('R$ ', '');
     L.push(`CLIENTE: ${m.cliente || '-'} | PERFIL: ${m.perfil} | MÊS DE REFERÊNCIA: ${MESES[r]}/${y}`);
     if ((ST.contexto || '').trim()) L.push(`\n[CONTEXTO DO CONSULTOR - informações do mês, use para explicar as variações]\n${ST.contexto.trim()}`);
+    const pend = pendencias();
+    if (pend.length) L.push(`\n[PENDÊNCIAS DE DOCUMENTOS - avise que a análise é parcial nestes pontos]\n${pend.join('; ')}`);
     L.push(`Valores em R$. "Acumulado" = jan a ${MES3[r].toLowerCase()} de cada ano. AV = % da receita. AH = variação vs ano anterior.`);
     L.push(`\n[DFC CAIXA ACUMULADO] linha: ${ys.join(' | ')} | AV ${y} | AH ${y}/${p}`);
     ['ENT', 'VAR', 'MC', 'FIX', 'ROA', 'FIN', 'ROD', 'PE', 'PS', 'RET'].forEach(k => {
@@ -1774,6 +1801,20 @@ if (typeof module !== 'undefined') module.exports = Charts;
     if (m.orc) {
       const o = m.orc; L.push(`\n[ORÇADO x REALIZADO ACUMULADO - COMPETÊNCIA] linha: orçado | realizado | var%`);
       ['ENT', 'VAR', 'MC', 'FIX', 'ROA', 'RET'].forEach(k => { if (o.n1[k]) { const a = sumTo(o.n1[k].orc, r), b = sumTo(o.n1[k].real, r); L.push(`${KND.N1NOME[k]}: ${n(a)} | ${n(b)} | ${fmtP(pct(b, a))}`); } });
+      // ranking das categorias contra o orçado (mês e acumulado)
+      const cats = [];
+      ['VAR', 'FIX', 'FIN', 'PS'].forEach(k => (o.kids[k] || []).filter(g => g.kids).forEach(g => {
+        const mm = menorMelhorOrc(k, g), s = mm ? -1 : 1;
+        cats.push({ nome: g.name, dm: s * (g.real[r] - g.orc[r]), da: s * (sumTo(g.real, r) - sumTo(g.orc, r)), pa: pct(sumTo(g.real, r), sumTo(g.orc, r)) });
+      }));
+      const fmtD = x => `${n(x.da)} (${fmtP(x.pa)})`;
+      const pior = cats.filter(x => x.da < -0.5).sort((a, b) => a.da - b.da).slice(0, 5), melhor = cats.filter(x => x.da > 0.5).sort((a, b) => b.da - a.da).slice(0, 5);
+      L.push(`\n[CATEGORIAS QUE MAIS OFENDERAM O ORÇAMENTO - ACUMULADO] (valor = quanto pior que o orçado)`);
+      pior.forEach(x => L.push(`${x.nome}: ${fmtD({ da: -x.da, pa: x.pa })}`));
+      L.push(`[CATEGORIAS MELHORES QUE O ORÇAMENTO - ACUMULADO] (valor = economia/ganho vs orçado)`);
+      melhor.forEach(x => L.push(`${x.nome}: ${fmtD(x)}`));
+      const piorMes = cats.filter(x => x.dm < -0.5).sort((a, b) => a.dm - b.dm).slice(0, 3);
+      if (piorMes.length) L.push(`Ofensores do mês de ${MES3[r]}: ${piorMes.map(x => `${x.nome} (${n(-x.dm)} acima do orçado)`).join('; ')}`);
       const fl = fcaLista().slice(0, 8);
       if (fl.length) { L.push(`Maiores desvios desfavoráveis (conta - gestor: orçado | realizado | var):`); fl.forEach(x => L.push(`${x.conta} - ${x.gestor}: ${n(x.or)} | ${n(x.re)} | ${n(x.d)}`)); }
     }
@@ -1801,6 +1842,8 @@ Responda EXATAMENTE neste formato, com os marcadores entre colchetes, nesta orde
 - 3 a 4 tópicos curtos
 [OFENSORES]
 - 3 a 4 tópicos curtos
+[PENDENCIAS]
+- se houver PENDÊNCIAS DE DOCUMENTOS, 1 tópico dizendo o que ficou parcial; se não houver, escreva "- Nenhuma"
 
 DADOS:
 `;
@@ -1811,12 +1854,22 @@ DADOS:
     $('#cp-count').className = txt.length > 8000 ? 'alerta' : 'ok';
   }
   function abrirCopilot() {
-    $('#cp-contexto').value = ST.contexto || '';
     atualizarPacote();
     $('#copilot').classList.add('on');
   }
+  async function gerarAnalise() {
+    if (!ST.M || !ST.M.caixa) return alert('Carregue os arquivos do mês primeiro.');
+    const txt = PROMPT + pacote();
+    atualizarPacote();
+    try { await navigator.clipboard.writeText(txt); } catch (e) { const t = $('#cp-pacote'); t.select(); document.execCommand('copy'); }
+    window.open(AGENTE_URL || AGENTE_PADRAO, '_blank', 'noopener');
+    $('#copilot').classList.add('on');
+    $('#cp-msg').textContent = '';
+    $('#cp-aviso').innerHTML = `<b>✓ Dados copiados.</b> No agente que abriu, aperte <b>Ctrl+V</b> e <b>Enter</b>. Quando ele responder, copie a resposta inteira e cole aqui embaixo.`;
+    setTimeout(() => $('#cp-resposta').focus(), 300);
+  }
   function aplicarResposta(txt) {
-    const re = /\[(MANCHETE|RECEITA|CUSTOS_MARGEM|RESULTADO|CAIXA|FOCO|POSITIVOS|OFENSORES)\]\s*([\s\S]*?)(?=\n?\s*\[(?:MANCHETE|RECEITA|CUSTOS_MARGEM|RESULTADO|CAIXA|FOCO|POSITIVOS|OFENSORES)\]|$)/g;
+    const re = /\[(MANCHETE|RECEITA|CUSTOS_MARGEM|RESULTADO|CAIXA|FOCO|POSITIVOS|OFENSORES|PENDENCIAS)\]\s*([\s\S]*?)(?=\n?\s*\[(?:MANCHETE|RECEITA|CUSTOS_MARGEM|RESULTADO|CAIXA|FOCO|POSITIVOS|OFENSORES|PENDENCIAS)\]|$)/g;
     let m, n = 0; while ((m = re.exec(txt))) { ST.copilot[m[1]] = m[2].replace(/\*\*/g, '').trim(); n++; }
     if (n) Object.keys(ST.edit).forEach(k => { if (/^(opr|dest)-/.test(k)) delete ST.edit[k]; });
     return n;
@@ -1979,12 +2032,33 @@ DADOS:
       const tg = e.target.closest('[data-tg]');
       if (tg && tg.dataset.tg) { const id = tg.dataset.tg; ST.aberto.has(id) ? ST.aberto.delete(id) : ST.aberto.add(id); rerenderKeep(); }
     });
-    $('#btn-copilot').onclick = () => ST.M && ST.M.caixa ? abrirCopilot() : alert('Carregue o DFC do cliente primeiro.');
+    $('#btn-copilot').onclick = gerarAnalise;
+    $('#cp-ver').onclick = e => { e.preventDefault(); $('#cp-pacote').classList.toggle('show'); };
     $('#cp-fechar').onclick = () => $('#copilot').classList.remove('on');
     $('#cp-copiar').onclick = async () => { const t = $('#cp-pacote'); t.select(); try { await navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } $('#cp-copiar').textContent = 'Copiado ✓'; setTimeout(() => $('#cp-copiar').textContent = 'Copiar para o Copilot', 1800); };
-    $('#cp-aplicar').onclick = () => { const n = aplicarResposta($('#cp-resposta').value); $('#cp-msg').textContent = n ? `${n} blocos aplicados ao One Page Report e aos Destaques.` : 'Não encontrei os marcadores [MANCHETE], [RECEITA]… na resposta.'; if (n) { rerenderKeep(); } };
+    $('#cp-aplicar').onclick = () => { const n = aplicarResposta($('#cp-resposta').value); $('#cp-msg').textContent = n ? `✓ ${n} blocos aplicados ao OPR e aos Destaques. Pode fechar este painel.` : 'Não encontrei os marcadores [MANCHETE], [RECEITA]… na resposta.'; if (n) { rerenderKeep(); } };
     $('#btn-pdf').onclick = baixarPDF;
-    $('#cp-contexto').addEventListener('input', e => { ST.contexto = e.target.value; $('#cp-ctxn').textContent = `${e.target.value.length}/1500`; atualizarPacote(); });
+    // ditado do contexto (Chrome/Edge): fala → texto no campo
+    (() => {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition, btn = $('#btn-mic'), campo = $('#ctx-side');
+      if (!SR) { btn.disabled = true; btn.textContent = '🎤 Ditado indisponível neste navegador (use Chrome ou Edge)'; return; }
+      let rec = null, base = '';
+      const parar = () => { if (rec) rec.stop(); };
+      btn.onclick = () => {
+        if (rec) return parar();
+        rec = new SR(); rec.lang = 'pt-BR'; rec.continuous = true; rec.interimResults = true;
+        base = campo.value ? campo.value.replace(/\s*$/, ' ') : '';
+        rec.onresult = e => {
+          let fim = '', parcial = '';
+          for (let i = 0; i < e.results.length; i++) (e.results[i].isFinal ? (fim += e.results[i][0].transcript) : (parcial += e.results[i][0].transcript));
+          campo.value = (base + fim + parcial).slice(0, 1500);
+        };
+        rec.onerror = e => { if (e.error === 'not-allowed') alert('O navegador bloqueou o microfone. Libere o acesso ao microfone para este site e tente de novo.'); };
+        rec.onend = () => { rec = null; btn.classList.remove('on'); btn.textContent = '🎤 Falar o contexto'; campo.dispatchEvent(new Event('input')); };
+        rec.start(); btn.classList.add('on'); btn.textContent = '■ Parar de gravar';
+      };
+    })();
+    $('#ctx-side').addEventListener('input', e => { ST.contexto = e.target.value; $('#ctx-n').textContent = `${e.target.value.length}/1500`; if (ST.M && ST.M.caixa) { atualizarPacote(); rerenderKeep(); } });
     $('#cfg-cliente').addEventListener('change', e => { ST.nomeCliente = e.target.value.trim(); if (ST.M) { ST.M.cliente = ST.nomeCliente; rerenderKeep(); } });
     document.querySelectorAll('.in-logo').forEach(inp => inp.addEventListener('change', async () => {
       const fs = [...inp.files]; if (!fs.length) return;
