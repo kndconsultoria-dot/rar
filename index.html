@@ -186,6 +186,7 @@ body.apresentando main{padding-bottom:60px}
     <div id="logo-prev" class="logo-prev"></div></div>
     <h5>Contexto do mês <small id="ctx-n" style="float:right;font-weight:400">0/1500</small></h5>
     <button class="bt mini mic" id="btn-mic" type="button" title="Falar o contexto (o texto é transcrito no campo abaixo)">🎤 Falar o contexto</button>
+    <p id="mic-dica" class="hint" style="margin:0 0 6px"></p>
     <textarea id="ctx-side" maxlength="1500" class="ctx-side" placeholder="O que aconteceu no cliente neste mês? Ex.: puxada de produção por problemas com o MAPA; estamos adiantando estoque, o que eleva matéria-prima e embalagens."></textarea>
     <p class="hint">Vai junto com os números para o agente KND explicar as variações.</p>
     <h5 class="so-pronto">Sumário</h5><nav id="indice"></nav>
@@ -2038,14 +2039,22 @@ DADOS:
     $('#cp-copiar').onclick = async () => { const t = $('#cp-pacote'); t.select(); try { await navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } $('#cp-copiar').textContent = 'Copiado ✓'; setTimeout(() => $('#cp-copiar').textContent = 'Copiar para o Copilot', 1800); };
     $('#cp-aplicar').onclick = () => { const n = aplicarResposta($('#cp-resposta').value); $('#cp-msg').textContent = n ? `✓ ${n} blocos aplicados ao OPR e aos Destaques. Pode fechar este painel.` : 'Não encontrei os marcadores [MANCHETE], [RECEITA]… na resposta.'; if (n) { rerenderKeep(); } };
     $('#btn-pdf').onclick = baixarPDF;
-    // ditado do contexto (Chrome/Edge): fala → texto no campo
+    // ditado do contexto: Chrome, Edge e Safari usam o reconhecimento de voz do navegador;
+    // Brave, Opera e Firefox não têm esse serviço → usamos o ditado do próprio sistema (Windows + H / Mac: Fn Fn)
     (() => {
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition, btn = $('#btn-mic'), campo = $('#ctx-side');
-      if (!SR) { btn.disabled = true; btn.textContent = '🎤 Ditado indisponível neste navegador (use Chrome ou Edge)'; return; }
+      const btn = $('#btn-mic'), campo = $('#ctx-side'), ua = navigator.userAgent;
+      const mac = /Mac|iPhone|iPad/.test(navigator.platform || ua);
+      const atalho = mac ? 'aperte a tecla Fn duas vezes (ou 🎤 no teclado)' : 'aperte Windows + H';
+      const semServico = !!navigator.brave || /OPR\/|Opera|Firefox|FxiOS/.test(ua);
+      const SR = semServico ? null : (window.SpeechRecognition || window.webkitSpeechRecognition);
+      const ditadoSistema = msg => {
+        campo.focus();
+        $('#mic-dica').innerHTML = `${msg ? msg + ' ' : ''}Use o ditado do computador: com o cursor no campo, <b>${atalho}</b> e fale.`;
+      };
+      if (!SR) { btn.onclick = () => ditadoSistema('Este navegador não tem ditado próprio.'); return; }
       let rec = null, base = '';
-      const parar = () => { if (rec) rec.stop(); };
       btn.onclick = () => {
-        if (rec) return parar();
+        if (rec) return rec.stop();
         rec = new SR(); rec.lang = 'pt-BR'; rec.continuous = true; rec.interimResults = true;
         base = campo.value ? campo.value.replace(/\s*$/, ' ') : '';
         rec.onresult = e => {
@@ -2053,9 +2062,12 @@ DADOS:
           for (let i = 0; i < e.results.length; i++) (e.results[i].isFinal ? (fim += e.results[i][0].transcript) : (parcial += e.results[i][0].transcript));
           campo.value = (base + fim + parcial).slice(0, 1500);
         };
-        rec.onerror = e => { if (e.error === 'not-allowed') alert('O navegador bloqueou o microfone. Libere o acesso ao microfone para este site e tente de novo.'); };
+        rec.onerror = e => {
+          if (e.error === 'not-allowed') $('#mic-dica').innerHTML = 'O navegador bloqueou o microfone: clique no cadeado ao lado do endereço e permita o microfone.';
+          else if (e.error === 'network' || e.error === 'service-not-allowed' || e.error === 'language-not-supported') ditadoSistema('O serviço de voz do navegador não respondeu.');
+        };
         rec.onend = () => { rec = null; btn.classList.remove('on'); btn.textContent = '🎤 Falar o contexto'; campo.dispatchEvent(new Event('input')); };
-        rec.start(); btn.classList.add('on'); btn.textContent = '■ Parar de gravar';
+        try { rec.start(); btn.classList.add('on'); btn.textContent = '■ Parar de gravar'; $('#mic-dica').textContent = ''; } catch (err) { rec = null; ditadoSistema(''); }
       };
     })();
     $('#ctx-side').addEventListener('input', e => { ST.contexto = e.target.value; $('#ctx-n').textContent = `${e.target.value.length}/1500`; if (ST.M && ST.M.caixa) { atualizarPacote(); rerenderKeep(); } });
