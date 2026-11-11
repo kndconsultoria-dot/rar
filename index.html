@@ -2068,7 +2068,11 @@ DADOS:
     $('#cp-copiar').onclick = () => { atualizarPacote(); const ok = copiarTexto($('#cp-pacote').value); $('#cp-copiar').textContent = ok ? 'Copiado ✓' : 'Não copiou – selecione o texto abaixo e use Ctrl+C'; setTimeout(() => $('#cp-copiar').textContent = '1. Copiar dados', 2500); if (!ok) { const d = document.querySelector('.cp-det'); d.open = true; $('#cp-pacote').select(); } };
     $('#cp-abrir').onclick = () => window.open(AGENTE_URL || AGENTE_PADRAO, '_blank', 'noopener');
     // colou a resposta → aplica sozinho
-    $('#cp-resposta').addEventListener('paste', () => setTimeout(() => { if (/\[MANCHETE\]/.test($('#cp-resposta').value)) $('#cp-aplicar').click(); }, 50));
+    $('#cp-resposta').addEventListener('paste', () => setTimeout(() => {
+      const v = $('#cp-resposta').value.trim();
+      if (/\[MANCHETE\]/.test(v)) return $('#cp-aplicar').click();
+      $('#cp-msg').innerHTML = `<span class="alerta">O que foi colado não é a análise${v.length < 40 ? ` ("${esc(v)}")` : ''}. O botão de copiar do Copilot às vezes falha: na resposta do agente, selecione o texto com o mouse (do [MANCHETE] até o fim), aperte Ctrl+C e cole aqui de novo.</span>`;
+    }, 50));
     $('#cp-aplicar').onclick = () => { const n = aplicarResposta($('#cp-resposta').value); $('#cp-msg').textContent = n ? `✓ ${n} blocos aplicados ao OPR e aos Destaques. Pode fechar este painel.` : 'Não encontrei os marcadores [MANCHETE], [RECEITA]… na resposta.'; if (n) { rerenderKeep(); } };
     $('#btn-pdf').onclick = baixarPDF;
     // ditado do contexto: Chrome, Edge e Safari usam o reconhecimento de voz do navegador;
