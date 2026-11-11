@@ -1891,7 +1891,7 @@ DADOS:
     $('#cp-msg').textContent = '';
     if (ok) {
       window.open(AGENTE_URL || AGENTE_PADRAO, '_blank', 'noopener');
-      $('#cp-aviso').innerHTML = `<b>✓ Dados copiados (${txt.length.toLocaleString('pt-BR')} caracteres).</b> No agente que abriu, aperte <b>Ctrl+V</b> e <b>Enter</b>. O texto colado deve começar com "Você é analista financeiro sênior da KND". Depois copie a resposta do agente e cole aqui embaixo.`;
+      $('#cp-aviso').innerHTML = `<b>✓ Dados copiados (${txt.length.toLocaleString('pt-BR')} caracteres).</b> No agente que abriu, aperte <b>Ctrl+V</b> e <b>Enter</b> (o texto colado começa com "Você é analista financeiro sênior da KND"). Na resposta do agente, clique em <b>Copiar</b> no bloco e cole aqui embaixo: o relatório é atualizado na hora.`;
     } else {
       $('#cp-aviso').innerHTML = `<b>O navegador não deixou copiar automaticamente.</b> Clique em <b>Copiar dados</b> abaixo e depois em <b>Abrir agente</b>.`;
     }
@@ -1899,6 +1899,7 @@ DADOS:
   }
   function aplicarResposta(txt) {
     const re = /\[(MANCHETE|RECEITA|CUSTOS_MARGEM|RESULTADO|CAIXA|FOCO|POSITIVOS|OFENSORES|PENDENCIAS)\]\s*([\s\S]*?)(?=\n?\s*\[(?:MANCHETE|RECEITA|CUSTOS_MARGEM|RESULTADO|CAIXA|FOCO|POSITIVOS|OFENSORES|PENDENCIAS)\]|$)/g;
+    txt = String(txt).replace(/```[a-z]*\n?/gi, '');
     let m, n = 0; while ((m = re.exec(txt))) { ST.copilot[m[1]] = m[2].replace(/\*\*/g, '').trim(); n++; }
     if (n) Object.keys(ST.edit).forEach(k => { if (/^(opr|dest)-/.test(k)) delete ST.edit[k]; });
     return n;
@@ -2066,6 +2067,8 @@ DADOS:
     $('#cp-fechar').onclick = () => $('#copilot').classList.remove('on');
     $('#cp-copiar').onclick = () => { atualizarPacote(); const ok = copiarTexto($('#cp-pacote').value); $('#cp-copiar').textContent = ok ? 'Copiado ✓' : 'Não copiou – selecione o texto abaixo e use Ctrl+C'; setTimeout(() => $('#cp-copiar').textContent = '1. Copiar dados', 2500); if (!ok) { const d = document.querySelector('.cp-det'); d.open = true; $('#cp-pacote').select(); } };
     $('#cp-abrir').onclick = () => window.open(AGENTE_URL || AGENTE_PADRAO, '_blank', 'noopener');
+    // colou a resposta → aplica sozinho
+    $('#cp-resposta').addEventListener('paste', () => setTimeout(() => { if (/\[MANCHETE\]/.test($('#cp-resposta').value)) $('#cp-aplicar').click(); }, 50));
     $('#cp-aplicar').onclick = () => { const n = aplicarResposta($('#cp-resposta').value); $('#cp-msg').textContent = n ? `✓ ${n} blocos aplicados ao OPR e aos Destaques. Pode fechar este painel.` : 'Não encontrei os marcadores [MANCHETE], [RECEITA]… na resposta.'; if (n) { rerenderKeep(); } };
     $('#btn-pdf').onclick = baixarPDF;
     // ditado do contexto: Chrome, Edge e Safari usam o reconhecimento de voz do navegador;
