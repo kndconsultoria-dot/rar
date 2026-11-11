@@ -65,8 +65,8 @@ body.pronto #drop{display:none}
 .hint{color:var(--ink2);font-size:12px;margin:6px 0}.big{font-size:34px;font-weight:700;color:var(--verde);margin:40px 0 4px}
 .legend{display:flex;gap:14px;font-size:12px;color:var(--ink2);margin:2px 0 2px}.legend i,.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 svg.chart{width:100%;height:auto;display:block;font-family:inherit}
-svg .v{font-size:13px;font-weight:700;fill:var(--ink)} svg .vs{font-size:9.5px;fill:var(--ink2)} svg .x{font-size:12px;fill:var(--ink2)} svg .x.b{font-weight:700;fill:var(--ink)}
-svg .sub{font-size:11px;fill:var(--muted)} svg .ax{font-size:10.5px;fill:var(--muted)} svg .pv{font-size:11.5px;font-weight:700}
+svg .v{font-size:13px;font-weight:700;fill:var(--ink)} svg .vs{font-size:9.5px;fill:#3a4752} svg .x{font-size:12px;fill:var(--ink2)} svg .x.b{font-weight:700;fill:var(--ink)}
+svg .sub{font-size:12px;fill:#1b2733;font-weight:600} svg .ax{font-size:10.5px;fill:var(--muted)} svg .pv{font-size:11.5px;font-weight:700}
 svg [data-tip]:hover{opacity:.85}
 .tb{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
 .tb th{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink2);font-weight:600;text-align:right;padding:6px 8px;border-bottom:2px solid var(--verde);background:#fff;position:sticky;top:57px}
@@ -141,6 +141,11 @@ body.apresentando .tb th{top:0}
 @media print{.opr-logo{bottom:40px}#pctrl{display:none!important}.cfoto{border-radius:0}.capa2{min-height:210mm}}
 .logo-prev{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}.logo-prev img{height:26px;max-width:110px;object-fit:contain;border:1px solid var(--linha);border-radius:4px;padding:2px;background:#fff}.ctx-l{display:flex;justify-content:space-between;font-size:13px;color:#0f3d6e}.ctx-l small{color:var(--muted)}
 .modos{display:grid;grid-template-columns:1fr 1fr;gap:14px;text-align:left;margin:6px 0 10px}.modos>div{border:1px solid var(--linha);border-radius:10px;padding:12px 14px;background:#f7fafc}.modos b{color:var(--verde)}.modos ol{margin:6px 0 4px;padding-left:18px;font-size:13px;color:var(--ink);line-height:1.5}.modos small{color:var(--ink2);font-size:12px}
+.drill tr.link{cursor:pointer}.drill tr.link:hover td{background:#d6ebf7}.drill.geral tr.lv1 td{font-weight:500}
+.drill.blk th.sep,.drill.blk td.sep{border-left:2px solid var(--linha);padding-left:14px}.drill.blk tr.g th{text-align:center;border-bottom:1px solid var(--linha);color:var(--verde);font-size:11.5px}
+.drill tr[data-tgb]{cursor:pointer}.drill tr[data-tgb]:hover td{background:#f0f7fc}.voltar{color:var(--verde2);text-decoration:none;font-weight:600}
+body.apresentando main{padding-bottom:60px}
+@media print{.voltar{display:none}}
 /* ---------- impressão / PDF ---------- */
 @media print{
   @page{size:A4 landscape;margin:0}
@@ -1047,7 +1052,9 @@ const Charts = (() => {
   /** Barras por ano (acumulado). items: [{label, value, color, sub}] */
   function anual(items, o = {}) {
     const W = o.w || 520, H = o.h || 300, padT = 46, padX = 24;
-    const padB = 52 + (items.some(i => i.value < 0) ? 20 : 0);
+    const temNeg = items.some(i => i.value < 0), temSub = items.some(i => i.sub);
+    // espaço embaixo: rótulo do ano/categoria + linha de apoio; com barra negativa, o valor fica entre a barra e o rótulo
+    const padB = (temSub ? 62 : 42) + (temNeg ? 28 : 0);
     const fmt = o.fmt || (v => v);
     const vals = items.map(i => i.value);
     const hasNeg = vals.some(v => v < 0), hasPos = vals.some(v => v > 0);
@@ -1061,10 +1068,11 @@ const Charts = (() => {
       const cx = padX + slot * (i + 0.5), h = Math.abs(it.value) / span * plotH, up = it.value >= 0;
       const y = up ? y0 - h : y0;
       s += `<path d="${rr(cx - bw / 2, y, bw, h, 4, up)}" fill="${it.color}" data-tip="${esc(it.label)}: ${esc(fmt(it.value))}"/>`;
-      const ty = up ? y - 8 : y + h + 16;
-      s += `<text x="${cx}" y="${ty}" text-anchor="middle" class="v">${esc(fmt(it.value))}</text>`;
-      s += `<text x="${cx}" y="${H - padB + 20}" text-anchor="middle" class="x">${esc(it.label)}</text>`;
-      if (it.sub) s += `<text x="${cx}" y="${H - padB + 38}" text-anchor="middle" class="sub">${esc(it.sub)}</text>`;
+      const ty = up ? y - 8 : y + h + 17;
+      s += `<text x="${cx}" y="${ty}" text-anchor="middle" class="v${up ? '' : ' vneg'}">${esc(fmt(it.value))}</text>`;
+      const xl = H - padB + (temNeg ? 28 : 0) + 22;
+      s += `<text x="${cx}" y="${xl}" text-anchor="middle" class="x">${esc(it.label)}</text>`;
+      if (it.sub) s += `<text x="${cx}" y="${xl + 21}" text-anchor="middle" class="sub">${esc(it.sub)}</text>`;
       if (i > 0 && o.var !== false) {
         const prev = items[i - 1].value, p = Math.abs(prev) < 0.5 || prev < 0 || (it.value < 0 && prev > 0) ? null : (it.value - prev) / Math.abs(prev);
         if (p != null) {
@@ -1200,7 +1208,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
   const $ = s => document.querySelector(s);
 
   const ST = {
-    M: null, aberto: new Set(), copilot: {}, fca: {}, notas: {}, edit: {},
+    fechado: new Set(), M: null, aberto: new Set(), fechado: new Set(), copilot: {}, fca: {}, notas: {}, edit: {},
     logos: { knd: (window.KND_ASSETS || {}).kndEscuro || '', kndBranco: (window.KND_ASSETS || {}).kndBranco || '', capa: (window.KND_ASSETS || {}).capa || '', cliente: [] },
     materialidade: 1, // só ignora diferenças de centavos
   };
@@ -1488,23 +1496,58 @@ if (typeof module !== 'undefined') module.exports = Charts;
       return h;
     }).join('');
   }
-  function sOrc(modo) {
-    const o = M().orc, keys = ['ENT', 'VAR', 'MC', 'FIX', 'ROA', 'FIN', 'ROD', 'PE', 'PS', 'RET'];
+  const ORC_KEYS = ['ENT', 'VAR', 'MC', 'FIX', 'ROA', 'FIN', 'ROD', 'PE', 'PS', 'RET'];
+  const ORC_NOME = { ENT: 'Receitas', VAR: 'Despesas variáveis', FIX: 'Despesas fixas', FIN: 'Financeiro', PE: 'Entradas patrimoniais', PS: 'Saídas patrimoniais' };
+  // visão geral: grandes linhas + grupos, mês e acumulado lado a lado; clicar num bloco leva ao detalhe dele
+  function sOrcGeral() {
+    const o = M().orc, m = M().ref;
     let body = '';
-    for (const k of keys) {
+    for (const k of ORC_KEYS) {
       const n1 = o.n1[k]; if (!n1) continue;
-      const kids = (o.kids[k] || []).length;
-      const node = { id: 'orc' + k, name: KND.N1NOME[k], orc: n1.orc, real: n1.real };
-      body += linhaOrc(node, k, 0, modo, kids).replace('class="lv0', `class="lv0 n1${['MC', 'ROA', 'ROD', 'RET'].includes(k) ? ' res' : ''}`);
-      if (kids && ST.aberto.has(node.id + modo)) body += linhasOrc(o.kids[k], k, 1, modo);
+      const temBloco = (o.kids[k] || []).length && !KND.isZero(n1.orc.concat(n1.real));
+      let linha = linhaBloco({ id: 'orcG' + k, name: KND.N1NOME[k], orc: n1.orc, real: n1.real }, k, 0, false)
+        .replace('<tr class="lv0', `<tr${temBloco ? ` data-ir="orc-blk-${k}"` : ''} class="lv0 n1${['MC', 'ROA', 'ROD', 'RET'].includes(k) ? ' res' : ''}${temBloco ? ' link' : ''}`);
+      if (temBloco) linha = linha.replace('<td>', '<td><span class="tg">›</span>');
+      body += linha;
+      if (temBloco) body += (o.kids[k] || []).map(n => linhaBloco(n, k, 1, false)).join('');
     }
-    const ent = o.n1.ENT, m = M().ref, f = v => modo === 'mes' ? v[m] : sumTo(v, m);
-    const sub = ent ? `Receita ${modo === 'mes' ? 'do mês' : 'acumulada'} de <b>${fmtC(f(ent.real))}</b> contra orçamento de ${fmtC(f(ent.orc))} (${fmtP(pct(f(ent.real), f(ent.orc)))}).` : '';
-    return slide('orc-' + modo, 'Orçado × Realizado', `Orçado × Realizado · ${modo === 'mes' ? MESES[m] : 'Acumulado'}`,
-      `<div class="tbtools no-print"><button class="bt mini" data-abrir-orc="${modo}">Abrir todas as contas</button><button class="bt mini" data-fechar-orc="${modo}">Só os grupos</button></div>
-       <table class="tb num drill"><thead><tr><th>DRE (regime de competência)</th><th>Orçado</th><th>Realizado</th><th>Var. R$</th><th>Var. %</th><th></th></tr></thead><tbody>${body}</tbody></table>
-       <p class="hint">Farol: <i class="fa g"></i> verde = no orçado ou melhor · <i class="fa r"></i> vermelho = pior que o orçado (FCA obrigatório). Receitas e resultados: melhor é realizar acima do orçado; custos e despesas: melhor é realizar abaixo. Clique numa linha com ▸ para abrir as contas.</p>`,
-      { sub, tag: modo === 'mes' ? `Mês de ${refTxt()}` : acumTxt() });
+    const ent = o.n1.ENT;
+    const sub = ent ? `Receita de ${MESES[m].toLowerCase()}: <b>${fmtC(ent.real[m])}</b> (${fmtP(pct(ent.real[m], ent.orc[m]))} vs orçado). Acumulado: <b>${fmtC(sumTo(ent.real, m))}</b> (${fmtP(pct(sumTo(ent.real, m), sumTo(ent.orc, m)))}).` : '';
+    return slide('orc-geral', 'Orçado × Realizado', 'Orçado × Realizado · visão geral',
+      `<table class="tb num drill blk geral"><thead><tr class="g"><th></th><th colspan="4">${MESES[m]}</th><th colspan="5" class="sep">Acumulado jan–${MES3[m].toLowerCase()}</th></tr>
+       <tr><th>DRE (regime de competência)</th><th>Orçado</th><th>Realizado</th><th>Var. %</th><th></th><th class="sep">Orçado</th><th>Realizado</th><th>Var. R$</th><th>Var. %</th><th></th></tr></thead><tbody>${body}</tbody></table>
+       <p class="hint">Farol: <i class="fa g"></i> verde = no orçado ou melhor · <i class="fa r"></i> vermelho = pior que o orçado (FCA). Clique num bloco (›) para abrir o detalhe com todas as contas.</p>`,
+      { sub, tag: `Mês e acumulado · ${M().ano}` });
+  }
+  // detalhe de um bloco: mês e acumulado lado a lado, com todas as contas
+  function linhaBloco(node, k, nivel, temKids) {
+    const m = M().ref, om = node.orc[m], rm = node.real[m], oa = sumTo(node.orc, m), ra = sumTo(node.real, m);
+    if ([om, rm, oa, ra].every(v => Math.abs(v) < 0.5)) return '';
+    const mm = menorMelhorOrc(k, node), fm = farol(om, rm, mm), fa = farol(oa, ra, mm);
+    const id = node.id + 'blk', aberto = !ST.fechado.has(id);
+    return `<tr class="lv${nivel}${temKids ? ' grp' : ''}"${temKids ? ` data-tgb="${id}"` : ''}>
+      <td>${temKids ? `<span class="tg">${aberto ? '▾' : '▸'}</span>` : ''}${esc(node.name)}${node.gestor ? `<small>${esc(node.gestor)}</small>` : ''}</td>
+      <td>${fmtN(om)}</td><td>${fmtN(rm)}</td><td>${fmtP(pct(rm, om))}</td><td><i class="fa ${fm}"></i></td>
+      <td class="sep">${fmtN(oa)}</td><td>${fmtN(ra)}</td><td class="${fa === 'r' ? 'vn' : ''}">${fmtN(ra - oa)}</td><td>${fmtP(pct(ra, oa))}</td><td><i class="fa ${fa}"></i></td></tr>`;
+  }
+  function linhasBloco(nodes, k, nivel) {
+    return nodes.map(n => {
+      const kids = n.kids && n.kids.length;
+      let h = linhaBloco(n, k, nivel, kids);
+      if (kids && h && !ST.fechado.has(n.id + 'blk')) h += linhasBloco(n.kids, k, nivel + 1);
+      return h;
+    }).join('');
+  }
+  function sOrcBloco(k) {
+    const o = M().orc, n1 = o.n1[k], m = M().ref; if (!n1 || !(o.kids[k] || []).length || KND.isZero(n1.orc.concat(n1.real))) return '';
+    const tot = linhaBloco({ id: 'orcT' + k, name: KND.N1NOME[k], orc: n1.orc, real: n1.real }, k, 0, false).replace('class="lv0', 'class="lv0 n1');
+    const nVerm = KND.leaves(o.kids[k]).filter(({ node: n }) => farol(sumTo(n.orc, m), sumTo(n.real, m), menorMelhorOrc(k, n)) === 'r').length;
+    return slide('orc-blk-' + k, 'Orçado × Realizado', `Orçado × Realizado · ${ORC_NOME[k] || KND.N1NOME[k]}`,
+      `<table class="tb num drill blk"><thead><tr class="g"><th></th><th colspan="4">${MESES[m]}</th><th colspan="5" class="sep">Acumulado jan–${MES3[m].toLowerCase()}</th></tr>
+       <tr><th>Conta</th><th>Orçado</th><th>Realizado</th><th>Var. %</th><th></th><th class="sep">Orçado</th><th>Realizado</th><th>Var. R$</th><th>Var. %</th><th></th></tr></thead>
+       <tbody>${tot}${linhasBloco(o.kids[k], k, 1)}</tbody></table>
+       <p class="hint"><a href="#orc-geral" data-ir="orc-geral" class="voltar">‹ voltar à visão geral</a> · Clique num grupo (▾) para recolher as contas.</p>`,
+      { sub: `Acumulado: realizado ${fmtC(sumTo(n1.real, m))} contra ${fmtC(sumTo(n1.orc, m))} orçados (${fmtP(pct(sumTo(n1.real, m), sumTo(n1.orc, m)))}); ${nVerm} conta(s) pior que o orçado.`, tag: `Mês e acumulado · ${M().ano}` });
   }
   function sOrcGraf(pares, id, titulo) {
     const o = M().orc, m = M().ref;
@@ -1668,7 +1711,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
       h += sBonificacoes();
     }
     if (m.usd) h += sUSD();
-    if (m.orc) h += sOrc('mes') + sOrc('acum') + sOrcGraf([['ENT', 'Receita'], ['MC', 'Margem de contribuição']], 'orc-graf-1', 'Orçado × Realizado · receita e margem')
+    if (m.orc) h += sOrcGeral() + ['ENT', 'VAR', 'FIX', 'FIN', 'PE', 'PS'].map(sOrcBloco).join('') + sOrcGraf([['ENT', 'Receita'], ['MC', 'Margem de contribuição']], 'orc-graf-1', 'Orçado × Realizado · receita e margem')
       + sOrcGraf([['ROA', 'Resultado operacional antes do financeiro'], ['ROD', 'Resultado operacional após o financeiro']], 'orc-graf-2', 'Orçado × Realizado · resultado operacional');
     if (m.bancos) h += sBancos();
     if (m.caixa) h += sCascata('acum') + sCascata('mes') + sRecebimento() + sResultados() + slidesCaixaDetalhe();
@@ -1850,7 +1893,7 @@ DADOS:
       (m.caixa && m.caixa.avisos.length ? `<div class="st warn"><b>⚠ Conferência</b>${m.caixa.avisos.map(a => `<small>${esc(a)}</small>`).join('')}</div>` : '') +
       (erros.length ? `<div class="st warn"><b>⚠ Não consegui ler</b>${erros.map(a => `<small>${esc(a)}</small>`).join('')}</div>` : '');
     if (!m.caixa && !m.fat && !m.orc) { $('#deck').innerHTML = '<p class="vazio">Nenhuma das quatro fontes (DFC, competência, faturamento, bancos) foi reconhecida.</p>'; return; }
-    ST.aberto.clear(); ST.edit = {};
+    ST.aberto.clear(); ST.fechado.clear(); ST.edit = {};
     if (m.orc) ['mes', 'acum'].forEach(md => Object.keys(m.orc.n1).forEach(k => ST.aberto.add('orc' + k + md)));
     document.body.classList.add('pronto');
     if (m.caixa) document.title = `KND · ${m.cliente || 'Relatório'} · ${refTxt()}`;
@@ -1861,7 +1904,7 @@ DADOS:
   const slides = () => [...document.querySelectorAll('#deck .slide')];
   function ajustarEscala() {
     const sl = slides()[atual]; if (!sl) return;
-    const sc = Math.min((innerWidth - 40) / 1120, (innerHeight - 30) / Math.max(630, sl.offsetHeight));
+    const sc = Math.min((innerWidth - 40) / 1120, (innerHeight - 30) / 630); // slides longos rolam, sem encolher a letra
     document.documentElement.style.setProperty('--esc', Math.max(0.5, sc).toFixed(3));
   }
   function irPara(i) {
@@ -1888,13 +1931,13 @@ DADOS:
   // ------------------------------------------------------------------ PDF com todas as contas abertas
   function baixarPDF() {
     if (!ST.M) return;
-    const antes = new Set(ST.aberto), m = ST.M;
+    const antes = new Set(ST.aberto), antesF = new Set(ST.fechado), m = ST.M; ST.fechado.clear();
     if (m.caixa) ['VAR', 'FIX', 'FIN', 'PE', 'PS'].forEach(k => KND.headersOf(m.caixa.kids[k] || []).forEach(h => ST.aberto.add(h.id)));
     if (m.orc) ['mes', 'acum'].forEach(md => Object.keys(m.orc.n1).forEach(k => { ST.aberto.add('orc' + k + md); KND.headersOf(m.orc.kids[k] || []).forEach(h => ST.aberto.add(h.id + md)); }));
     const estavaApresentando = document.body.classList.contains('apresentando');
     if (estavaApresentando) apresentar(false);
     render();
-    const voltar = () => { ST.aberto = antes; rerenderKeep(); window.removeEventListener('afterprint', voltar); };
+    const voltar = () => { ST.aberto = antes; ST.fechado = antesF; rerenderKeep(); window.removeEventListener('afterprint', voltar); };
     window.addEventListener('afterprint', voltar);
     setTimeout(() => window.print(), 60);
   }
@@ -1921,6 +1964,10 @@ DADOS:
         }
         return rerenderKeep();
       }
+      const ir = e.target.closest('[data-ir]');
+      if (ir) { e.preventDefault(); const id = ir.dataset.ir; if (document.body.classList.contains('apresentando')) irPara(slides().findIndex(x => x.id === id)); else { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth' }); } return; }
+      const tb = e.target.closest('[data-tgb]');
+      if (tb) { const id = tb.dataset.tgb; ST.fechado.has(id) ? ST.fechado.delete(id) : ST.fechado.add(id); return rerenderKeep(); }
       const tg = e.target.closest('[data-tg]');
       if (tg && tg.dataset.tg) { const id = tg.dataset.tg; ST.aberto.has(id) ? ST.aberto.delete(id) : ST.aberto.add(id); rerenderKeep(); }
     });
