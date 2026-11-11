@@ -140,6 +140,7 @@ body.apresentando #pctrl:hover{opacity:1}#pctrl #ptit{color:var(--ink2);max-widt
 body.apresentando .tb th{top:0}
 @media print{.opr-logo{bottom:40px}#pctrl{display:none!important}.cfoto{border-radius:0}.capa2{min-height:210mm}}
 .logo-prev{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}.logo-prev img{height:26px;max-width:110px;object-fit:contain;border:1px solid var(--linha);border-radius:4px;padding:2px;background:#fff}.ctx-l{display:flex;justify-content:space-between;font-size:13px;color:#0f3d6e}.ctx-l small{color:var(--muted)}
+.modos{display:grid;grid-template-columns:1fr 1fr;gap:14px;text-align:left;margin:6px 0 10px}.modos>div{border:1px solid var(--linha);border-radius:10px;padding:12px 14px;background:#f7fafc}.modos b{color:var(--verde)}.modos ol{margin:6px 0 4px;padding-left:18px;font-size:13px;color:var(--ink);line-height:1.5}.modos small{color:var(--ink2);font-size:12px}
 /* ---------- impressão / PDF ---------- */
 @media print{
   @page{size:A4 landscape;margin:0}
@@ -177,15 +178,23 @@ body.apresentando .tb th{top:0}
   <main>
     <div id="drop">
       <h1>Solte aqui os arquivos do mês</h1>
-      <p>Arraste o <b>fechamento do cliente</b>, o <b>Histórico KND</b> e as <b>logomarcas do cliente</b> (.png/.jpg) – pode soltar tudo de uma vez.<br>A página reconhece sozinha cada aba e monta o relatório.</p>
+      <p>Arraste o <b>fechamento da controladoria</b>, a <b>base gráfica</b> (ou os fechamentos dos anos anteriores) e a <b>logomarca do cliente</b>.<br>A página reconhece sozinha cada aba e monta o relatório.</p>
       <div class="fontes">
         <div><b>DFC / Caixa</b>Resultado de caixa mês a mês</div>
         <div><b>Competência</b>Orçado × realizado por conta e gestor</div>
         <div><b>Faturamento</b>Receitas, devoluções, intercompany</div>
         <div><b>Bancos</b>Saldos bancários consolidados</div>
-        <div><b>Histórico KND</b>Anos anteriores para comparar</div>
+        <div><b>Anos anteriores</b>Base gráfica ou fechamentos antigos</div>
       </div>
-      <p class="hint" style="margin-top:-6px">Sem base gráfica? Solte os fechamentos do cliente do ano atual e dos anos anteriores: o mais recente vira o mês atual e os outros viram o comparativo.</p>
+      <div class="modos">
+        <div><b>Modo 1 · Com base gráfica</b>
+          <ol><li>Fechamento do mês enviado pela controladoria</li><li>Base gráfica do cliente (abas 2024, 2025… e Faturamento NOVO)</li><li>Logomarca do cliente</li></ol>
+          <small>Os anos anteriores vêm da base gráfica.</small></div>
+        <div><b>Modo 2 · Só com os fechamentos da controladoria</b>
+          <ol><li>Fechamento do mês atual</li><li>Fechamento de dezembro do ano anterior</li><li>Fechamento de dezembro do ano retrasado</li><li>Logomarca do cliente</li></ol>
+          <small>O ano de cada arquivo vem do nome (ex.: "12-2025"). O mais recente vira o mês atual; os outros, o comparativo.</small></div>
+      </div>
+      <p class="hint">Solte tudo de uma vez. O painel à esquerda mostra o que foi reconhecido em cada arquivo.</p>
       <label class="bt pri">Escolher arquivos<input type="file" accept=".xlsx,.xlsm,.png,.jpg,.jpeg,.svg,.webp" multiple hidden onchange="this.files.length&&KNDApp.processar([...this.files])"></label>
     </div>
     <div id="deck"></div>
@@ -646,6 +655,26 @@ const KND = (() => {
     }
     return out;
   }
+  const BASE_CATS = [['Devolução', /devolu/], ['Intercompany', /intercompany/], ['Exportação', /exporta/], ['Sucata', /sucata/], ['Imobilizado', /imobilizado|imbilizado/], ['Aluguel', /aluguel/], ['Ressarcimento', /ressarc/], ['Serviço', /servi/], ['Nacional', /nacional/]];
+  function readBaseFat(grid) {
+    const out = {};
+    for (let r = 0; r < grid.length; r++) {
+      const row = grid[r]; if (!row) continue;
+      for (let c = 0; c < Math.min(row.length, 6); c++) {
+        const t = row[c]; if (typeof t !== 'string') continue;
+        if (monthIdx(row[c + 1]) !== 0 && norm(row[c + 1]) !== 'jan') continue;
+        const nt = norm(t); if (/^total|orcad|realizad/.test(nt)) continue;
+        const cat = (BASE_CATS.find(([, re]) => re.test(nt)) || [])[0]; if (!cat) continue;
+        for (let rr = r + 1; rr < Math.min(grid.length, r + 20); rr++) {
+          const g = grid[rr]; if (!g) continue;
+          const y = g[c]; if (!isNum(y) || y < 2000 || y > 2100) { if (typeof y === 'string' && y.trim()) break; continue; }
+          out[y] = out[y] || {};
+          if (!out[y][cat]) out[y][cat] = Array.from({ length: 12 }, (_, k) => isNum(g[c + 1 + k]) ? Math.abs(g[c + 1 + k]) : 0);
+        }
+      }
+    }
+    return out;
+  }
   function readUSD(grid) {
     const out = { orc: zeros(12), real: zeros(12), pedidos: [], cotacao: '' };
     let hc = -1, hr = -1, co = -1, cr = -1;
@@ -739,10 +768,18 @@ const KND = (() => {
   const TIPOS_MES = ['caixa', 'competencia', 'faturamento', 'bancos', 'usd'];
   /** Lê vários arquivos. O fechamento mais recente vira o ano atual; fechamentos de anos anteriores viram histórico. */
   async function carregar(files, log = () => { }) {
-    const lidos = [], porArq = [], hist = {};
+    const lidos = [], porArq = [], hist = {}, baseGraf = [];
     for (const f of files) {
       let wb;
       try { wb = await openWorkbook(f); } catch (e) { log({ arquivo: f.name, erro: e.message }); continue; }
+      // base gráfica KND: abas com nome de ano ("2024", "2025"…) no layout do DFC → histórico
+      const abasAno = wb.abas.filter(a => /^\s*20\d{2}\s*$/.test(a.nome) && textCells(a.previa).some(x => /^entradas$/.test(x[2])));
+      if (abasAno.length >= 2) {
+        const fatAba = wb.abas.find(a => /faturamento novo|^faturamento$|historico faturamento/.test(norm(a.nome)));
+        baseGraf.push({ arquivo: f.name, anos: abasAno, fat: fatAba });
+        lidos.push({ arquivo: f.name, abas: wb.abas.length, base: true });
+        continue;
+      }
       const achados = {};
       for (const aba of wb.abas) {
         const sc = classify(aba);
@@ -768,6 +805,13 @@ const KND = (() => {
       for (const t of ['caixa', 'competencia', 'faturamento']) if (a.achados[t]) ant[t] = await pega(a.achados[t]);
     }
     for (const t in hist) fonte[t] = await pega(hist[t]);
+    fonte.base = [];
+    for (const b of baseGraf) {
+      const item = { arquivo: b.arquivo, caixa: {}, fat: null };
+      for (const a of b.anos) { const y = +a.nome.trim(); if (!anoAtual || y < anoAtual) item.caixa[y] = await a.carregar(); }
+      if (b.fat) item.fat = await b.fat.carregar();
+      fonte.base.push(item);
+    }
     return { fonte, lidos };
   }
 
@@ -912,9 +956,13 @@ const KND = (() => {
     const histAbas = ['hist_caixa', 'hist_fat', 'hist_cfg', 'hist_comp'].filter(t => fonte[t]).map(t => ({ tipo: t, grid: fonte[t].grid }));
     const hist = readHistorico(histAbas);
     hist.origem = {};
+    for (const b of fonte.base || []) {
+      for (const y in b.caixa) if (!hist.caixa[y]) { try { hist.caixa[y] = readDFC(b.caixa[y]); hist.origem[y] = b.arquivo; } catch (e) { } }
+      if (b.fat) { try { const bf = readBaseFat(b.fat); for (const y in bf) if (!hist.fat[y] && (!fonte.anoAtual || +y < fonte.anoAtual)) hist.fat[y] = bf[y]; } catch (e) { } }
+    }
     for (const y in fonte.anteriores || {}) {
       const a = fonte.anteriores[y], ano = +y;
-      try { if (a.caixa) { hist.caixa[ano] = readDFC(a.caixa.grid); hist.origem[ano] = a.arquivo; } } catch (e) { }
+      try { if (a.caixa) { hist.caixa[ano] = readDFC(a.caixa.grid); hist.origem[ano] = a.arquivo; } } catch (e) { } // fechamento do próprio ano tem prioridade
       try {
         if (a.faturamento) {
           const f = readFaturamento(a.faturamento.grid), cats = {};
@@ -948,7 +996,8 @@ const KND = (() => {
     item('bancos', 'Saldos bancários', !!bancos, fonte.bancos ? `${fonte.bancos.arquivo} › ${fonte.bancos.aba}` : 'não encontrado');
     if (fonte.usd) item('usd', 'Receita em dólar', !!usd, `${fonte.usd.arquivo} › ${fonte.usd.aba}`);
     const hy = Object.keys(hist.caixa);
-    item('historico', 'Anos anteriores', hy.length > 0, hy.length ? hy.map(y => `${y}: ${hist.origem[y] || (fonte.hist_caixa ? fonte.hist_caixa.arquivo : '')}`).join(' · ') : 'não encontrado (gráficos só com o ano atual)');
+    const grupos = {}; hy.forEach(y => { const o = hist.origem[y] || (fonte.hist_caixa ? fonte.hist_caixa.arquivo : ''); (grupos[o] = grupos[o] || []).push(+y); });
+    item('historico', 'Anos anteriores', hy.length > 0, hy.length ? Object.entries(grupos).map(([o, ys]) => `${Math.min(...ys) === Math.max(...ys) ? ys[0] : Math.min(...ys) + '–' + Math.max(...ys)}: ${o}`).join(' · ') : 'não encontrado – solte a base gráfica, o Histórico KND ou os fechamentos dos anos anteriores');
     return { caixa, orc, fat, bancos, usd, hist, anoAtual: fonte.anoAtual, status, erros, ano, ref: refFinal, cliente: hist.config.cliente || '', perfil: hist.config.perfil || 'Indústria' };
   }
 
