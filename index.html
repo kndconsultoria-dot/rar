@@ -7,7 +7,7 @@
 <style>
 :root{
   --verde:#14283B; --verde2:#0E6EAF; --vivo:#6CC7EF; --claro:#EAF5FB; --ink:#1d2a22; --ink2:#5b6b62; --muted:#8a978f;
-  --linha:#e3e9e5; --fundo:#f2f4f3; --pos:#3E8E41; --neg:#B5473A; --amar:#D9A520;
+  --linha:#e3e9e5; --fundo:#f2f4f3; --pos:#0A8A8F; --neg:#B5473A; --amar:#D9A520;
   font-family:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif; color:var(--ink);
 }
 *{box-sizing:border-box} body{margin:0;background:var(--fundo)}
@@ -195,7 +195,7 @@ body.apresentando main{padding-bottom:60px}
     <p class="hint">Vai junto com os números para o agente KND explicar as variações.</p>
     <h5 class="so-pronto">Sumário</h5><nav id="indice"></nav>
     <p class="hint">Os arquivos são lidos só neste navegador. Nada é enviado para a internet.</p>
-    <p class="hint" style="opacity:.7">Versão 11/11/2026 20:24</p>
+    <p class="hint" style="opacity:.7">Versão 12/11/2026 10:42</p>
   </aside>
   <main>
     <div id="drop">
@@ -1063,7 +1063,7 @@ const Charts = (() => {
   'use strict';
   const C = {
     ink: '#1b2733', ink2: '#56636e', muted: '#87939d', grid: '#e6ebef', base: '#c3ccd4',
-    verde: '#14283B', verdeVivo: '#6CC7EF', pos: '#3E8E41', neg: '#B5473A', cinza: '#C5CFD8',
+    verde: '#14283B', verdeVivo: '#6CC7EF', pos: '#0A8A8F', neg: '#B5473A', cinza: '#C5CFD8',
   };
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const niceMax = v => { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p; };
@@ -1330,6 +1330,11 @@ if (typeof module !== 'undefined') module.exports = Charts;
         L.RECEITA.push(`${t}: ${b(fmtC(v))}${vp ? ` (${fmtP(pct(v, vp))} vs ${py}${k === 'Serviço' ? `; ${v - vp >= 0 ? '+' : ''}${fmtC(v - vp)}` : ''})` : ''}`);
       });
     }
+    // sem aba de faturamento: receita pela competência (vs orçado) e pelos recebimentos do caixa (vs ano anterior)
+    if (!f) {
+      if (o && o.n1.ENT) { const re = sumTo(o.n1.ENT.real, r), or = sumTo(o.n1.ENT.orc, r); L.RECEITA.push(`Receita ${y} (competência): ${b(fmtC(re))} (${fmtP(pct(re, or))} vs orçado)`); }
+      if (c) { const v = ytd(c.n1.ENT.y[y]), vp = py ? ytd(c.n1.ENT.y[py]) : null; L.RECEITA.push(`Recebimentos no caixa: ${b(fmtC(v))}${vp ? ` (${fmtP(pct(v, vp))} vs ${py})` : ''}`); }
+    }
     // CUSTOS E MARGEM (DRE – competência)
     if (o && o.n1.ENT) {
       const rec = sumTo(o.n1.ENT.real, r), hp = py && o.hist[py];
@@ -1357,6 +1362,12 @@ if (typeof module !== 'undefined') module.exports = Charts;
       L.CAIXA.push(`Caixa final: ${b(fmtC(t.fim[r]))}`);
       L.CAIXA.push(`${va >= 0 ? 'Aumento' : 'Redução'} de caixa no ano: ${b(fmtC(va))} (${fmtP(pct(t.fim[r], t.ini[0]))})`);
       L.CAIXA.push(`${vm >= 0 ? 'Aumento' : 'Redução'} no mês: ${b(fmtC(vm))} (${fmtP(pct(t.fim[r], t.ini[r]))})${r ? `; mês anterior: ${fmtC(t.fim[r - 1] - t.ini[r - 1])}` : ''}`);
+    }
+    // sem saldos bancários: caixa pelo fluxo retido do DFC
+    if (!bk && c) {
+      const ra = ytd(c.n1.RET.y[y]), rp = py ? ytd(c.n1.RET.y[py]) : null, rm = c.n1.RET.y[y][r];
+      L.CAIXA.push(`Fluxo de caixa retido no ano: ${b(fmtC(ra))}${rp != null ? ` (${py}: ${fmtC(rp)})` : ''}`);
+      L.CAIXA.push(`Retido no mês: ${b(fmtC(rm))}${r ? `; mês anterior: ${fmtC(c.n1.RET.y[y][r - 1])}` : ''}`);
     }
     return L;
   }
@@ -1549,7 +1560,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
     const aberto = ST.aberto.has(node.id + modo);
     return `<tr class="lv${nivel}${temKids ? ' grp' : ''}"${temKids ? ` data-tg="${node.id + modo}"` : ''}>
       <td>${temKids ? `<span class="tg">${aberto ? '▾' : '▸'}</span>` : ''}${esc(node.name)}${node.gestor ? `<small>${esc(node.gestor)}</small>` : ''}</td>
-      <td>${fmtN(o)}</td><td>${fmtN(r)}</td><td class="${fl === 'r' ? 'vn' : ''}">${fmtN(r - o)}</td><td>${fmtP(pct(r, o))}</td><td><i class="fa ${fl}" title="${fl === 'r' ? 'Vermelho: pior que o orçado (FCA)' : 'Verde: no orçado ou melhor'}"></i></td></tr>`;
+      <td>${fmtN(o)}</td><td>${fmtN(r)}</td><td class="${fl === 'r' ? 'vn' : ''}">${fmtN(r - o)}</td><td>${fmtP(pct(r, o))}</td><td><i class="fa ${fl}" title="${fl === 'r' ? 'Pior que o orçado (FCA)' : 'No orçado ou melhor'}"></i></td></tr>`;
   }
   function linhasOrc(nodes, k, nivel, modo) {
     return nodes.map(n => {
@@ -1579,7 +1590,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
     return slide('orc-geral', 'Orçado × Realizado', 'Orçado × Realizado · visão geral',
       `<table class="tb num drill blk geral"><thead><tr class="g"><th></th><th colspan="4">${MESES[m]}</th><th colspan="5" class="sep">Acumulado jan–${MES3[m].toLowerCase()}</th></tr>
        <tr><th>DRE (regime de competência)</th><th>Orçado</th><th>Realizado</th><th>Var. %</th><th></th><th class="sep">Orçado</th><th>Realizado</th><th>Var. R$</th><th>Var. %</th><th></th></tr></thead><tbody>${body}</tbody></table>
-       <p class="hint">Farol: <i class="fa g"></i> verde = no orçado ou melhor · <i class="fa r"></i> vermelho = pior que o orçado (FCA). Clique num bloco (›) para abrir o detalhe com todas as contas.</p>`,
+       <p class="hint">Farol: <i class="fa g"></i> no orçado ou melhor · <i class="fa r"></i> pior que o orçado (FCA). Clique num bloco (›) para abrir o detalhe com todas as contas.</p>`,
       { sub, tag: `Mês e acumulado · ${M().ano}` });
   }
   // detalhe de um bloco: mês e acumulado lado a lado, com todas as contas
