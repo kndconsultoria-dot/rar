@@ -173,7 +173,7 @@ body.apresentando main{padding-bottom:60px}
 <div class="top">
   <div class="marca"><img id="top-logo" alt="KND" style="height:30px;display:block"></div>
   <div class="nome">Relatório de resultados · caixa, faturamento e orçado × realizado</div>
-  <label class="bt pri">Carregar arquivos<input id="arquivos" type="file" accept=".xlsx,.xlsm,.png,.jpg,.jpeg,.svg,.webp" multiple hidden></label>
+  <label class="bt pri">Carregar arquivos<input id="arquivos" type="file" accept=".xlsx,.xlsm,.xls,.png,.jpg,.jpeg,.svg,.webp" multiple hidden></label>
   <button class="bt so-pronto" id="btn-abrir">Abrir todas as contas</button>
   <button class="bt so-pronto" id="btn-fechar">Fechar contas</button>
   <button class="bt ia so-pronto" id="btn-copilot">✦ Gerar análise (agente KND)</button>
@@ -195,7 +195,7 @@ body.apresentando main{padding-bottom:60px}
     <p class="hint">Vai junto com os números para o agente KND explicar as variações.</p>
     <h5 class="so-pronto">Sumário</h5><nav id="indice"></nav>
     <p class="hint">Os arquivos são lidos só neste navegador. Nada é enviado para a internet.</p>
-    <p class="hint" style="opacity:.7">Versão 12/11/2026 10:42</p>
+    <p class="hint" style="opacity:.7">Versão 12/11/2026 11:21</p>
   </aside>
   <main>
     <div id="drop">
@@ -217,7 +217,7 @@ body.apresentando main{padding-bottom:60px}
           <small>O ano de cada arquivo vem do nome (ex.: "12-2025"). O mais recente vira o mês atual; os outros, o comparativo.</small></div>
       </div>
       <p class="hint">Solte tudo de uma vez. O painel à esquerda mostra o que foi reconhecido em cada arquivo.</p>
-      <label class="bt pri">Escolher arquivos<input type="file" accept=".xlsx,.xlsm,.png,.jpg,.jpeg,.svg,.webp" multiple hidden onchange="this.files.length&&KNDApp.processar([...this.files])"></label>
+      <label class="bt pri">Escolher arquivos<input type="file" accept=".xlsx,.xlsm,.xls,.png,.jpg,.jpeg,.svg,.webp" multiple hidden onchange="this.files.length&&KNDApp.processar([...this.files])"></label>
     </div>
     <div id="deck"></div>
   </main>
@@ -363,8 +363,100 @@ const KND = (() => {
   }
 
   /** Abre um .xlsx e devolve { nome, abas:[{nome, previa(grid 45 linhas), carregar()}] } */
+  // ------------------------------------------------------------------ leitor XLS antigo (Excel 97–2003, BIFF8), sem bibliotecas
+  function readXls(buf) {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const u16 = o => dv.getUint16(o, true), u32 = o => dv.getUint32(o, true);
+    const ssz = 1 << u16(30), mssz = 1 << u16(32), cutoff = u32(56);
+    const off = sct => (sct + 1) * ssz;
+    // FAT a partir da DIFAT
+    const fatSecs = []; for (let i = 0; i < 109; i++) { const x = u32(76 + i * 4); if (x < 0xFFFFFFFA) fatSecs.push(x); }
+    let dif = u32(68), nd = u32(72);
+    while (nd-- > 0 && dif < 0xFFFFFFFA) { for (let i = 0; i < ssz / 4 - 1; i++) { const x = u32(off(dif) + i * 4); if (x < 0xFFFFFFFA) fatSecs.push(x); } dif = u32(off(dif) + ssz - 4); }
+    const fat = []; fatSecs.forEach(sc => { for (let i = 0; i < ssz / 4; i++) fat.push(u32(off(sc) + i * 4)); });
+    const chain = (st, tab) => { const out = []; let x = st, guard = 0; while (x < 0xFFFFFFFA && guard++ < 1e6) { out.push(x); x = tab[x]; } return out; };
+    const juntar = (secs, size, sz, base) => { const o = new Uint8Array(secs.length * sz); secs.forEach((sc, i) => o.set(buf.subarray(base(sc), base(sc) + sz), i * sz)); return o.subarray(0, size); };
+    const dir = juntar(chain(u32(48), fat), Infinity, ssz, off);
+    const ents = [];
+    for (let o = 0; o + 128 <= dir.length; o += 128) {
+      const nl = dir[o + 64] | (dir[o + 65] << 8); let nome = '';
+      for (let i = 0; i < Math.max(0, nl / 2 - 1); i++) nome += String.fromCharCode(dir[o + i * 2] | (dir[o + i * 2 + 1] << 8));
+      ents.push({ nome, tipo: dir[o + 66], st: dir[o + 116] | (dir[o + 117] << 8) | (dir[o + 118] << 16) | (dir[o + 119] << 24) >>> 0, size: (dir[o + 120] | (dir[o + 121] << 8) | (dir[o + 122] << 16) | (dir[o + 123] << 24)) >>> 0 });
+    }
+    const wbE = ents.find(e => /^(workbook|book)$/i.test(e.nome));
+    if (!wbE) throw new Error('arquivo .xls sem a pasta de trabalho');
+    let wb;
+    if (wbE.size >= cutoff) wb = juntar(chain(wbE.st >>> 0, fat), wbE.size, ssz, off);
+    else {
+      const root = ents[0], ms = juntar(chain(root.st >>> 0, fat), root.size, ssz, off);
+      const mfat = []; chain(u32(60), fat).forEach(sc => { for (let i = 0; i < ssz / 4; i++) mfat.push(u32(off(sc) + i * 4)); });
+      const secs = chain(wbE.st >>> 0, mfat), o = new Uint8Array(secs.length * mssz);
+      secs.forEach((sc, i) => o.set(ms.subarray(sc * mssz, sc * mssz + mssz), i * mssz)); wb = o.subarray(0, wbE.size);
+    }
+    const W = new DataView(wb.buffer, wb.byteOffset, wb.byteLength);
+    const w16 = o => W.getUint16(o, true), w32 = o => W.getUint32(o, true);
+    const cp1252 = new TextDecoder('windows-1252');
+    const txt = (o, n, wide) => wide ? String.fromCharCode(...Array.from({ length: n }, (_, i) => w16(o + i * 2))) : cp1252.decode(wb.subarray(o, o + n));
+    const rk = v => { let x; if (v & 2) x = v >> 2; else { const t = new DataView(new ArrayBuffer(8)); t.setUint32(4, v & 0xFFFFFFFC, true); t.setUint32(0, 0, true); x = t.getFloat64(0, true); } return v & 1 ? x / 100 : x; };
+    // 1ª passada: abas e tabela de textos (SST, com CONTINUE)
+    const sheets = [], sst = [];
+    let p = 0;
+    while (p + 4 <= wb.length) {
+      const tp = w16(p), ln = w16(p + 2), d = p + 4;
+      if (tp === 0x0085) { const pos = w32(d), kind = wb[d + 5], n = wb[d + 6], wide = wb[d + 7] & 1; if (kind === 0) sheets.push({ pos, nome: txt(d + 8, n, wide) }); }
+      if (tp === 0x00FC) {
+        const segs = [[d, d + ln]]; let q = d + ln;
+        while (q + 4 <= wb.length && w16(q) === 0x003C) { const l2 = w16(q + 2); segs.push([q + 4, q + 4 + l2]); q += 4 + l2; }
+        let si = 0, o = d + 8; const total = w32(d + 4);
+        const fix = () => { if (o >= segs[si][1] && si + 1 < segs.length) { si++; o = segs[si][0]; } };
+        for (let k = 0; k < total && si < segs.length; k++) {
+          fix(); const cch = w16(o); o += 2; fix(); let fl = wb[o++]; let runs = 0, ext = 0;
+          if (fl & 8) { runs = w16(o); o += 2; } if (fl & 4) { ext = w32(o); o += 4; }
+          let s2 = '', left = cch;
+          while (left > 0) {
+            const wide = fl & 1, cab = Math.floor((segs[si][1] - o) / (wide ? 2 : 1)), n = Math.min(left, cab);
+            s2 += txt(o, n, wide); o += n * (wide ? 2 : 1); left -= n;
+            if (left > 0) { si++; if (si >= segs.length) break; o = segs[si][0]; fl = wb[o++]; }
+          }
+          let skip = runs * 4 + ext;
+          while (skip > 0) { const cab = segs[si][1] - o, n = Math.min(skip, cab); o += n; skip -= n; if (skip > 0) { si++; if (si >= segs.length) break; o = segs[si][0]; } }
+          sst.push(s2);
+        }
+      }
+      p = d + ln;
+    }
+    const lerAba = (pos, maxRows) => {
+      const grid = []; let q = pos, pend = null, depth = 0;
+      const set = (r, c, v) => { if (maxRows && r >= maxRows) return; (grid[r] = grid[r] || [])[c] = v; };
+      while (q + 4 <= wb.length) {
+        const tp = w16(q), ln = w16(q + 2), d = q + 4; q = d + ln;
+        if (tp === 0x0809) { depth++; continue; }
+        if (tp === 0x000A) { if (--depth <= 0) break; continue; }
+        if (depth > 1) continue; // gráficos embutidos
+        const r = w16(d), c = w16(d + 2);
+        if (maxRows && r >= maxRows && [0x00FD, 0x0203, 0x027E, 0x00BD, 0x0006].includes(tp)) continue;
+        if (tp === 0x00FD) set(r, c, sst[w32(d + 6)]);
+        else if (tp === 0x0203) set(r, c, W.getFloat64(d + 6, true));
+        else if (tp === 0x027E) set(r, c, rk(w32(d + 6)));
+        else if (tp === 0x00BD) { const last = w16(d + ln - 2); for (let k = 0; k <= last - c; k++) set(r, c + k, rk(w32(d + 6 + k * 6))); }
+        else if (tp === 0x0204) { const n = w16(d + 6); set(r, c, txt(d + 9, n, wb[d + 8] & 1)); }
+        else if (tp === 0x0006) {
+          if (w16(d + 12) === 0xFFFF) { const k = wb[d + 6]; if (k === 0) pend = [r, c]; else if (k === 1) set(r, c, !!wb[d + 8]); }
+          else set(r, c, W.getFloat64(d + 6, true));
+        }
+        else if (tp === 0x0207 && pend) { const n = w16(d); set(pend[0], pend[1], txt(d + 3, n, wb[d + 2] & 1)); pend = null; }
+      }
+      for (let i = 0; i < grid.length; i++) if (grid[i]) for (let j = 0; j < grid[i].length; j++) if (grid[i][j] === undefined) grid[i][j] = null;
+      return grid;
+    };
+    return sheets.map((sh, i) => {
+      const fim = i + 1 < sheets.length ? sheets[i + 1].pos : wb.length;
+      return { nome: sh.nome, previa: lerAba(sh.pos, 45), tamanho: (fim - sh.pos) * 3, carregar: async () => lerAba(sh.pos) };
+    });
+  }
   async function openWorkbook(file) {
     const buf = new Uint8Array(await file.arrayBuffer());
+    if (buf[0] === 0xD0 && buf[1] === 0xCF && buf[2] === 0x11 && buf[3] === 0xE0) return { nome: file.name, abas: readXls(buf) };
     const z = zipIndex(buf);
     const wbXml = await zipText(z, 'xl/workbook.xml');
     const relXml = await zipText(z, 'xl/_rels/workbook.xml.rels') || '';
@@ -442,6 +534,11 @@ const KND = (() => {
     if (has(/^contas$/) && runs.length) sc.faturamento += 1;
     if (/banco|saldo/.test(n)) sc.bancos += 2;
     if (has(/^saldo inicial$/) && has(/^saldo final$/)) sc.bancos += 2;
+    if (isFatMetas(aba.previa)) sc.faturamento += 4;
+    if (isTreasy(aba.previa)) { // exportação Treasy: o mesmo relatório é o caixa realizado e o orçado × realizado
+      const extra = (/sintetic/.test(n) ? 1 : 0) + ((aba.previa[1] || []).some(v => /^historico/.test(norm(v))) ? 1 : 0);
+      sc.caixa = sc.competencia = 6 + extra; sc.faturamento = sc.bancos = 0;
+    }
     return sc;
   }
 
@@ -604,6 +701,58 @@ const KND = (() => {
     ['Nacional', /mercado interno|mercadoria|nacional|venda de produto|vendas de produto|venda de materia prima/],
   ];
   const fatCat = name => { const n = norm(name); for (const [k, re] of FAT_CATS) if (re.test(n)) return k; return null; };
+  // faturamento "por linha de negócio": uma aba por linha, cada bloco com
+  // MESES | REALIZADO <ano anterior> | META <ano> | META GERENCIAL REVISADA | REALIZADO <ano> | DIFERENÇA …
+  function isFatMetas(g) {
+    const t = textCells(g || []);
+    return t.some(x => /^meses$/.test(x[2])) && t.some(x => /^realizado 20\d{2}$/.test(x[2])) && t.some(x => /^meta /.test(x[2]));
+  }
+  function readFatBlocos(grid) {
+    const blocos = [];
+    for (let r = 0; r < Math.min(grid.length, 12); r++) {
+      const row = grid[r] || []; const cm = row.findIndex(v => typeof v === 'string' && norm(v) === 'meses'); if (cm < 0) continue;
+      const linhas = []; for (let rr = r + 1; rr < Math.min(grid.length, r + 16); rr++) { const mi = monthIdx((grid[rr] || [])[cm]); if (mi >= 0) linhas.push([mi, rr]); }
+      const anosR = row.map(v => /^realizado (20\d{2})$/.exec(typeof v === 'string' ? norm(v) : '')).filter(Boolean).map(x => +x[1]);
+      const anoMin = Math.min(...anosR);
+      for (let c = cm + 1; c < row.length; c++) {
+        const t = typeof row[c] === 'string' ? norm(row[c]) : ''; const ya = /^realizado (20\d{2})$/.exec(t); if (!ya || +ya[1] !== anoMin) continue;
+        // as colunas do bloco: até o próximo "realizado <ano anterior>"
+        const cols = { ant: c, anoAnt: +ya[1] };
+        for (let k = c + 1; k < Math.min(row.length, c + 7); k++) {
+          const h = typeof row[k] === 'string' ? norm(row[k]) : '';
+          if (h === t) break;
+          const yr = /^realizado (20\d{2})$/.exec(h);
+          if (yr) { cols.real = k; cols.ano = +yr[1]; } else if (/^meta gerencial/.test(h)) cols.ger = k; else if (/^meta (20\d{2})/.test(h) && cols.meta == null) cols.meta = k;
+        }
+        if (cols.real == null) continue;
+        let titulo = '';
+        for (let rr = r - 1; rr >= Math.max(0, r - 2) && !titulo; rr--) for (const cx of [c, c - 1, cm]) { const v = (grid[rr] || [])[cx]; if (typeof v === 'string' && v.trim() && !/meta|realizado/.test(norm(v))) { titulo = v.trim(); break; } }
+        const col = k => { const v = zeros(12); if (k != null) linhas.forEach(([mi, rr]) => { const x = (grid[rr] || [])[k]; if (isNum(x)) v[mi] = x; }); return v; };
+        blocos.push({ titulo, ano: cols.ano, anoAnt: cols.anoAnt, real: col(cols.real), ant: col(cols.ant), meta: col(cols.meta), ger: cols.ger != null ? col(cols.ger) : null });
+      }
+      break;
+    }
+    return blocos;
+  }
+  function readFatMetas(grids) {
+    const lista = [], cats = {}, orc = {}, metaOrig = {}, detalhe = {};
+    let ano = null, anoAnt = null, consolidado = null;
+    for (const { nome, grid } of grids) {
+      const bl = readFatBlocos(grid); if (!bl.length) continue;
+      ano = ano || bl[0].ano; anoAnt = anoAnt || bl[0].anoAnt;
+      const cons = bl.find(b => /consolidado|total/.test(norm(b.titulo))) || (bl.length === 1 ? bl[0] : null);
+      const partes = bl.filter(b => b !== cons);
+      const tot = cons || { real: partes.reduce((a, b) => add(a, b.real), zeros(12)), ant: partes.reduce((a, b) => add(a, b.ant), zeros(12)), meta: partes.reduce((a, b) => add(a, b.meta), zeros(12)), ger: partes.every(b => b.ger) ? partes.reduce((a, b) => add(a, b.ger), zeros(12)) : null };
+      const cat = bonito(nome.trim());
+      if (/^consolidado|^total/.test(norm(nome))) { consolidado = tot; continue; }
+      lista.push(cat);
+      cats[cat] = { [anoAnt]: tot.ant, [ano]: tot.real };
+      orc[cat] = tot.ger || tot.meta; metaOrig[cat] = tot.meta;
+      detalhe[cat] = partes.map(b => ({ name: bonito(b.titulo), v: b.real, ant: b.ant, orc: b.ger || b.meta }));
+    }
+    if (!lista.length) throw new Error('não encontrei os blocos "MESES / REALIZADO / META" do faturamento');
+    return { lista, cats, orc, metaOrig, detalhe, ano, anoAnt, consolidado };
+  }
   function readFaturamento(grid) {
     const runs = monthRuns(grid, 10);
     const out = { linhas: [], blocos: [] };
@@ -727,6 +876,46 @@ const KND = (() => {
     }
     return out;
   }
+  // formato "um bloco por mês": título com o mês ("… 2026 JANEIRO"), cabeçalho "Extrato | Saldo Inicial | Saldo Final",
+  // linha de total (sem nome) e as contas embaixo, até "Variação". Contas com "aplic" viram Aplicações; o resto, Conta corrente.
+  function readBancosBlocos(grid) {
+    const ini = zeros(12), fim = zeros(12), cc = { ini: zeros(12), fim: zeros(12) }, ap = { ini: zeros(12), fim: zeros(12) };
+    let achou = 0;
+    for (let r = 0; r < grid.length; r++) {
+      const row = grid[r]; if (!row) continue;
+      for (let c = 0; c < row.length; c++) {
+        if (!/^saldo inicial$/.test(norm(row[c])) || !/^saldo final$/.test(norm(row[c + 1]))) continue;
+        // título do bloco: até 3 linhas acima, nas colunas à esquerda
+        let mes = -1, titulo = '';
+        for (let rr = r - 1; rr >= Math.max(0, r - 3) && mes < 0; rr--) for (let cx = Math.max(0, c - 4); cx <= c; cx++) {
+          const t = grid[rr] && grid[rr][cx];
+          if (typeof t !== 'string') continue;
+          const nt = norm(t); if (/ytd|ate /.test(nt)) { mes = -2; break; }
+          const k = MES_NORM.findIndex(mn => new RegExp('\\b' + mn + '\\b').test(nt));
+          if (k >= 0) { mes = k; titulo = t; break; }
+        }
+        if (mes < 0) continue;
+        // coluna dos nomes das contas: a mais à esquerda do bloco com texto
+        let lc = c - 1; while (lc > 0 && typeof (grid[r] || [])[lc] !== 'string') lc--;
+        let tIni = null, tFim = null, sIni = 0, sFim = 0;
+        for (let rr = r + 1; rr < Math.min(grid.length, r + 25); rr++) {
+          const g = grid[rr] || [], nome = typeof g[lc] === 'string' ? g[lc].trim() : '';
+          if (/^variac/.test(norm(nome))) break;
+          const a = isNum(g[c]) ? g[c] : null, b = isNum(g[c + 1]) ? g[c + 1] : null;
+          if (a == null && b == null) { if (nome || rr > r + 1) continue; else continue; }
+          if (!nome && tIni == null) { tIni = a || 0; tFim = b || 0; continue; }
+          if (!nome) continue;
+          sIni += a || 0; sFim += b || 0;
+          const alvo = /aplic/.test(norm(nome)) ? ap : cc; alvo.ini[mes] += a || 0; alvo.fim[mes] += b || 0;
+        }
+        ini[mes] = tIni != null ? tIni : sIni; fim[mes] = tFim != null ? tFim : sFim; achou++;
+      }
+    }
+    if (!achou) throw new Error('não encontrei blocos "Saldo Inicial / Saldo Final" por mês');
+    // mês ainda aberto (saldo final zerado no fim do ano): não conta
+    for (let m = 11; m >= 0 && !fim[m]; m--) { ini[m] = 0; cc.ini[m] = cc.fim[m] = ap.ini[m] = ap.fim[m] = 0; }
+    return { total: { titulo: 'Saldo total', ini, fim }, partes: [{ titulo: 'Conta corrente', ...cc }, { titulo: 'Aplicações', ...ap }].filter(p => !isZero(p.fim) || !isZero(p.ini)) };
+  }
   function readBancos(grid) {
     const blocos = [];
     for (let r = 0; r < grid.length; r++) {
@@ -745,7 +934,7 @@ const KND = (() => {
         blocos.push({ titulo: String(tit).trim(), ini, fim });
       }
     }
-    if (!blocos.length) throw new Error('não encontrei blocos "Mês / Saldo Inicial / Saldo Final"');
+    if (!blocos.length) return readBancosBlocos(grid);
     let total = blocos.find(b => /saldos consolidados|consolidado geral|saldo total/.test(norm(b.titulo)));
     const consolidados = blocos.filter(b => /consolidad/.test(norm(b.titulo)) && b !== total);
     if (!total) {
@@ -754,6 +943,77 @@ const KND = (() => {
     }
     return { total, partes: consolidados.length ? consolidados : blocos.filter(b => b !== total) };
   }
+  // ------------------------------------------------------------------ Treasy (exportação "Estrutura | jan/2026 › Planejado | Realizado | Histórico")
+  // A hierarquia vem pelo recuo do nome (4 espaços por nível). Despesas vêm positivas; entradas e receitas financeiras, negativas.
+  function isTreasy(grid) {
+    const h1 = (grid && grid[1]) || [];
+    return !!grid && !!grid[0] && norm(grid[0][0]) === 'estrutura' && h1.some(v => norm(v) === 'planejado') && h1.some(v => norm(v) === 'realizado');
+  }
+  function treasyRows(grid) {
+    const h0 = grid[0], h1 = grid[1], meses = [];
+    let ano = null, anoHist = null;
+    for (let c = 1; c < h0.length; c++) {
+      const m = /^([a-z]{3}) (\d{4})$/.exec(typeof h0[c] === 'string' ? norm(h0[c]) : '');
+      if (!m || MES_ABR.indexOf(m[1]) < 0) continue;
+      ano = +m[2]; const cols = {};
+      for (let k = c; k < Math.min(c + 7, h1.length); k++) {
+        if (k > c && typeof h0[k] === 'string' && h0[k].trim()) break;
+        const t = norm(h1[k]);
+        if (t === 'planejado') cols.orc = k; else if (t === 'realizado') cols.real = k;
+        else if (/^historico/.test(t)) { cols.hist = k; const y = /(20\d{2})/.exec(h1[k]); if (y) anoHist = +y[1]; }
+      }
+      meses[MES_ABR.indexOf(m[1])] = cols;
+    }
+    const get = (row, campo) => Array.from({ length: 12 }, (_, m) => { const c = meses[m] && meses[m][campo]; return c != null && isNum(row[c]) ? row[c] : 0; });
+    const root = [], stack = [{ lvl: -1, kids: root }];
+    for (let r = 2; r < grid.length; r++) {
+      const row = grid[r]; if (!row || typeof row[0] !== 'string' || !row[0].trim()) continue;
+      const raw = row[0], txt = raw.trim(), lvl = Math.round((raw.length - raw.replace(/^\s+/, '').length) / 4);
+      const mm = /^(\d[\d.]*)\s*-\s*(.+)$/.exec(txt);
+      const node = { raw: txt, code: mm ? mm[1] : '', name: mm ? mm[2].trim() : txt, lvl, orc: get(row, 'orc'), real: get(row, 'real'), hist: get(row, 'hist'), kids: [] };
+      while (stack[stack.length - 1].lvl >= lvl) stack.pop();
+      stack[stack.length - 1].kids.push(node); stack.push(node);
+    }
+    return { root, ano, anoHist: anoHist || (ano ? ano - 1 : null), temHist: meses.some(c => c && c.hist != null) };
+  }
+  const bonito = s => (s === s.toUpperCase() && /[A-ZÀ-Ú]/.test(s) && (/\s/.test(s) || s.length > 6)) ? s.charAt(0) + s.slice(1).toLowerCase() : s;
+  const TREASY_N1 = [[/^\(\+\)\s*receita/, 'ENT'], [/^\(-\)\s*deduc/, 'VAR'], [/^\(-\)\s*gastos e despesas\W+variav/, 'VAR'], [/^\(-\)\s*gastos e despesas\W+fix/, 'FIX'], [/^\(-\)\s*depreciac/, 'FIX'], [/^\(-\)\s*outras/, 'OUT']];
+  const semAcento = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  // desce pelos níveis que só embrulham um grupo (ex.: "Despesas operacionais › WS Brasil › Despesas operacionais")
+  const desce = t => { while (t.kids.length === 1 && t.kids[0].kids.length) t = t.kids[0]; return t.kids.length ? t.kids : [t]; };
+  /** pick(t) → valores do nó (12 meses, ou 24 = orçado + realizado) */
+  function treasyTree(T, pick) {
+    const len = pick(T.root[0]).length, kids = {};
+    const conv = (t, s) => t.kids.length
+      ? { id: 'n' + (++uid), name: bonito(t.name), code: t.code, v: pick(t).map(x => x * s), kids: t.kids.map(k => conv(k, s)), header: true }
+      : { id: 'n' + (++uid), name: bonito(t.name), code: t.code, gestor: '', v: pick(t).map(x => x * s), kids: null };
+    const put = (k, nodes) => (kids[k] = kids[k] || []).push(...nodes);
+    for (const t of T.root) {
+      const hit = TREASY_N1.find(([re]) => re.test(semAcento(t.raw))); if (!hit) continue;
+      if (hit[1] !== 'OUT') { if (!isZero(pick(t)) || t.kids.length) put(hit[1], desce(t).map(x => conv(x, 1))); continue; }
+      // outras despesas: financeiro (receitas e despesas), entradas e saídas patrimoniais (imobilizado, investimentos, distribuição de lucros…)
+      for (const g of desce(t)) {
+        const ng = norm(g.name), [k, s] = /financeir/.test(ng) ? ['FIN', -1] : /^entrada/.test(ng) ? ['PE', -1] : ['PS', 1];
+        put(k, [conv(g, s)]);
+      }
+    }
+    const n1 = {}, tot = k => (kids[k] || []).reduce((a, n) => add(a, n.v), zeros(len));
+    ['ENT', 'VAR', 'FIX', 'FIN', 'PE', 'PS'].forEach(k => n1[k] = { name: N1NOME[k], v: tot(k) });
+    n1.MC = { name: N1NOME.MC, v: add(n1.ENT.v, n1.VAR.v, -1) };
+    n1.ROA = { name: N1NOME.ROA, v: add(n1.MC.v, n1.FIX.v, -1) };
+    n1.ROD = { name: N1NOME.ROD, v: add(n1.ROA.v, n1.FIN.v) };
+    n1.RET = { name: N1NOME.RET, v: add(add(n1.ROD.v, n1.PE.v), n1.PS.v, -1) };
+    return { n1, kids, order: ['ENT', 'VAR', 'MC', 'FIX', 'ROA', 'FIN', 'ROD', 'PE', 'PS', 'RET'], avisos: [] };
+  }
+  const comArvore = tree => Object.assign([], { tree });
+  // árvore → linhas no formato do DFC (para o "Histórico KND" exportado)
+  const N1LINHA = { ENT: 'Entradas', VAR: 'Despesas variáveis', MC: 'Margem de contribuição', FIX: 'Despesas fixas', ROA: 'Resultado operacional antes do financeiro', FIN: 'Financeiro', ROD: 'Resultado operacional após o financeiro', PE: 'Contas patrimoniais entradas', PS: 'Contas patrimoniais saídas', RET: 'Fluxo de caixa retido' };
+  function linhasDeArvore(t) {
+    const out = [], walk = n => { out.push({ code: n.kids ? '' : (n.code || ''), name: n.name, v: n.v.slice() }); if (n.kids) n.kids.forEach(walk); };
+    for (const k of ['ENT', 'VAR', 'MC', 'FIX', 'ROA', 'FIN', 'ROD', 'PE', 'PS', 'RET']) { if (!t.n1[k]) continue; out.push({ code: '', name: N1LINHA[k], v: t.n1[k].v.slice() }); (t.kids[k] || []).forEach(walk); }
+    return out;
+  }
+
   function readHistorico(abas) {
     const res = { config: {}, caixa: {}, fat: {}, comp: {} };
     for (const { tipo, grid } of abas) {
@@ -777,6 +1037,7 @@ const KND = (() => {
   // ano do arquivo: pelo nome (ex.: "08-2026") ou pelas datas de uma coluna "Data" dentro das abas
   function anoDoArquivo(nome, abas) {
     const m = /(20\d{2})/.exec(nome); if (m) return +m[1];
+    for (const aba of abas) for (const v of (aba.previa[0] || [])) { const x = /^[a-z]{3} (20\d{2})$/.exec(typeof v === 'string' ? norm(v) : ''); if (x) return +x[1]; }
     const cont = {};
     for (const aba of abas) {
       const g = aba.previa;
@@ -808,6 +1069,14 @@ const KND = (() => {
         const sc = classify(aba);
         for (const tipo in sc) if (sc[tipo] >= 3 && (!achados[tipo] || achados[tipo].score < sc[tipo])) achados[tipo] = { score: sc[tipo], arquivo: f.name, aba: aba.nome, ref: aba };
       }
+      if (achados.bancos) {
+        const cands = wb.abas.filter(a => classify(a).bancos >= 3 && /20\d{2}/.test(a.nome));
+        if (cands.length > 1) { const best = cands.sort((a, b) => +(/20\d{2}/.exec(b.nome)[0]) - +(/20\d{2}/.exec(a.nome)[0]))[0]; achados.bancos = { score: classify(best).bancos, arquivo: f.name, aba: best.nome, ref: best }; }
+      }
+      if (achados.faturamento && isFatMetas(achados.faturamento.ref.previa)) {
+        const abas = wb.abas.filter(a => isFatMetas(a.previa));
+        achados.faturamento = { ...achados.faturamento, aba: `abas ${abas.filter(a => !/^consolidado|^total|^metas/.test(norm(a.nome))).map(a => a.nome.trim()).join(', ')}`, multi: abas };
+      }
       for (const t in achados) if (/^hist_/.test(t) && (!hist[t] || hist[t].score < achados[t].score)) hist[t] = achados[t];
       const temMes = TIPOS_MES.some(t => achados[t]);
       const ano = temMes ? anoDoArquivo(f.name, wb.abas) : null;
@@ -818,7 +1087,7 @@ const KND = (() => {
     const anoAtual = anos.length ? Math.max(...anos) : null;
     const atual = porArq.filter(a => !a.ano || a.ano === anoAtual);
     const fonte = { anoAtual, anteriores: {} };
-    const pega = async x => ({ arquivo: x.arquivo, aba: x.aba, grid: await x.ref.carregar() });
+    const pega = async x => ({ arquivo: x.arquivo, aba: x.aba, grid: await x.ref.carregar(), grids: x.multi ? await Promise.all(x.multi.map(async a => ({ nome: a.nome, grid: await a.carregar() }))) : null });
     for (const t of TIPOS_MES) {
       const cand = atual.map(a => a.achados[t]).filter(Boolean).sort((a, b) => b.score - a.score)[0];
       if (cand) fonte[t] = await pega(cand);
@@ -853,8 +1122,8 @@ const KND = (() => {
 
   function montarCaixa(fonte, hist) {
     if (!fonte.caixa) return null;
-    const rowsCur = readDFC(fonte.caixa.grid);
-    const cur = buildTree(rowsCur);
+    const treasy = isTreasy(fonte.caixa.grid);
+    const cur = treasy ? treasyTree(treasyRows(fonte.caixa.grid), t => t.real) : buildTree(readDFC(fonte.caixa.grid));
     const anoCorrente = (() => {
       // ano: tenta achar no nome do arquivo (08-2026) ou usa o maior ano do histórico + 1
       if (fonte.anoAtual) return fonte.anoAtual;
@@ -876,7 +1145,7 @@ const KND = (() => {
     }
     // histórico → encaixa cada conta antiga na estrutura atual
     for (const y of histYears) {
-      const ht = buildTree(hist.caixa[y]);
+      const ht = hist.caixa[y].tree || buildTree(hist.caixa[y]);
       for (const k of keys) {
         if (ht.n1[k]) model.n1[k].y[y] = ht.n1[k].v.slice();
         const curLeaves = leaves(model.kids[k] || []);
@@ -939,6 +1208,20 @@ const KND = (() => {
 
   function montarFaturamento(fonte, hist, anoCorrente, ref) {
     if (!fonte.faturamento) return null;
+    if (fonte.faturamento.grids) {
+      const g = readFatMetas(fonte.faturamento.grids), cur = g.ano || anoCorrente;
+      const histYears = Object.keys(hist.fat).map(Number).filter(y => y < g.anoAnt).sort().slice(-1);
+      const years = histYears.concat([g.anoAnt, cur]);
+      const m = { years, cur, ref, lista: g.lista, cats: {}, detalhe: g.detalhe, blocos: [], analiticos: [], semCategoria: [], orc: g.orc, metaOrig: g.metaOrig, orcProprio: true };
+      g.lista.forEach(c => { m.cats[c] = {}; years.forEach(y => m.cats[c][y] = (g.cats[c][y] || (hist.fat[y] && hist.fat[y][c]) || zeros(12)).slice()); });
+      const soma = (y, campo) => g.lista.reduce((a, c) => add(a, campo ? campo(c) : m.cats[c][y]), zeros(12));
+      m.total = {}; m.totalSem = {};
+      years.forEach(y => { m.total[y] = soma(y); m.totalSem[y] = m.total[y]; });
+      if (g.consolidado) { m.total[cur] = g.consolidado.real.slice(); m.total[g.anoAnt] = g.consolidado.ant.slice(); m.totalSem = m.total; }
+      m.orcTotal = g.consolidado ? (g.consolidado.ger || g.consolidado.meta).slice() : soma(cur, c => g.orc[c]);
+      m.metaOrigTotal = g.consolidado ? g.consolidado.meta.slice() : soma(cur, c => g.metaOrig[c]);
+      return m;
+    }
     const f = readFaturamento(fonte.faturamento.grid);
     const cats = ['Nacional', 'Serviço', 'Exportação', 'Sucata', 'Imobilizado', 'Aluguel', 'Ressarcimento', 'Devolução', 'Intercompany'];
     const histYears = Object.keys(hist.fat).map(Number).filter(y => y < anoCorrente).sort().slice(-2);
@@ -968,16 +1251,16 @@ const KND = (() => {
 
   function montarOrcado(fonte, ref, hist) {
     if (!fonte.competencia) return null;
-    const rows = readCompetencia(fonte.competencia.grid);
-    const t = buildTree(rows);
+    const treasy = isTreasy(fonte.competencia.grid);
+    const t = treasy ? treasyTree(treasyRows(fonte.competencia.grid), x => x.orc.concat(x.real)) : buildTree(readCompetencia(fonte.competencia.grid));
     const split = n => { n.orc = n.v.slice(0, 12); n.real = n.v.slice(12); if (n.kids) n.kids.forEach(split); };
-    const m = { n1: {}, kids: {}, ref };
+    const m = { n1: {}, kids: {}, ref, regime: treasy ? 'caixa' : 'competencia' };
     let refC = 11;
     for (const k in t.n1) { m.n1[k] = { key: k, name: N1NOME[k] || t.n1[k].name, orc: t.n1[k].v.slice(0, 12), real: t.n1[k].v.slice(12) }; }
     if (m.n1.ENT) { while (refC > 0 && Math.abs(m.n1.ENT.real[refC]) < 0.5) refC--; m.ref = Math.min(ref == null ? refC : ref, refC); }
     for (const k in t.kids) { m.kids[k] = t.kids[k]; m.kids[k].forEach(split); }
     m.hist = {}; // realizado de anos anteriores (aba KND_Competencia do histórico), só os totais
-    for (const y in (hist && hist.comp) || {}) { const ht = buildTree(hist.comp[y]); m.hist[y] = {}; for (const k in ht.n1) m.hist[y][k] = ht.n1[k].v; }
+    for (const y in (hist && hist.comp) || {}) { const ht = hist.comp[y].tree || buildTree(hist.comp[y]); m.hist[y] = {}; for (const k in ht.n1) m.hist[y][k] = ht.n1[k].v; }
     return m;
   }
 
@@ -1005,6 +1288,13 @@ const KND = (() => {
       } catch (e) { }
       try { if (a.competencia) hist.comp[ano] = readCompetencia(a.competencia.grid).map(r => ({ code: r.code, name: r.name, v: r.v.slice(12) })); } catch (e) { }
     }
+    // Treasy com coluna "Histórico": vira o ano anterior (caixa e realizado do orçado), se nada melhor foi solto
+    for (const t of ['caixa', 'competencia']) {
+      const src = fonte[t]; if (!src || !isTreasy(src.grid)) continue;
+      const T = treasyRows(src.grid); if (!T.temHist || !T.anoHist) continue;
+      if (t === 'caixa' && !hist.caixa[T.anoHist]) { hist.caixa[T.anoHist] = comArvore(treasyTree(T, x => x.hist)); hist.origem[T.anoHist] = src.arquivo + ' (coluna Histórico)'; }
+      if (t === 'competencia' && !hist.comp[T.anoHist]) hist.comp[T.anoHist] = comArvore(treasyTree(T, x => x.hist));
+    }
     const status = []; const erros = [];
     const safe = (nome, fn) => { try { return fn(); } catch (e) { erros.push(`${nome}: ${e.message}`); return null; } };
     const caixa = safe('DFC / Caixa', () => montarCaixa(fonte, hist));
@@ -1015,14 +1305,14 @@ const KND = (() => {
     const fat = safe('Faturamento', () => montarFaturamento(fonte, hist, ano, refFinal));
     const bancos = safe('Saldos bancários', () => montarBancos(fonte));
     const usd = fonte.usd ? safe('Receita em dólar', () => readUSD(fonte.usd.grid)) : null;
-    if (fat && orc && orc.kids.ENT) {
+    if (fat && orc && orc.kids.ENT && !fat.orcProprio) {
       Object.keys(fat.cats).forEach(c => fat.orc[c] = zeros(12));
       leaves(orc.kids.ENT).forEach(({ node }) => { const c = fatCat(node.name); if (c && fat.orc[c]) fat.orc[c] = add(fat.orc[c], node.orc.map(Math.abs)); });
       fat.orcTotal = orc.n1.ENT.orc.slice();
     }
     const item = (chave, nome, ok, det) => status.push({ chave, nome, ok, det });
     item('caixa', 'DFC / Caixa', !!caixa, fonte.caixa ? `${fonte.caixa.arquivo} › ${fonte.caixa.aba}` : 'não encontrado');
-    item('competencia', 'Competência (Orçado × Realizado)', !!orc, fonte.competencia ? `${fonte.competencia.arquivo} › ${fonte.competencia.aba}` : 'não encontrado');
+    item('competencia', orc && orc.regime === 'caixa' ? 'Orçado × Realizado (caixa)' : 'Competência (Orçado × Realizado)', !!orc, fonte.competencia ? `${fonte.competencia.arquivo} › ${fonte.competencia.aba}` : 'não encontrado');
     item('faturamento', 'Faturamento', !!fat, fonte.faturamento ? `${fonte.faturamento.arquivo} › ${fonte.faturamento.aba}` : 'não encontrado');
     item('bancos', 'Saldos bancários', !!bancos, fonte.bancos ? `${fonte.bancos.arquivo} › ${fonte.bancos.aba}` : 'não encontrado');
     if (fonte.usd) item('usd', 'Receita em dólar', !!usd, `${fonte.usd.arquivo} › ${fonte.usd.aba}`);
@@ -1050,6 +1340,7 @@ const KND = (() => {
   return {
     MESES, MES3, norm, sumTo, zeros, add, isZero, similar, fatCat, N1NOME,
     openWorkbook, classify, carregar, montarTudo, readDFC, readCompetencia, buildTree, leaves, headersOf,
+    isTreasy, treasyRows, treasyTree, linhasDeArvore,
     fmtR, fmtN, fmtC, fmtP, pct, nf1, nf2,
   };
 })();
@@ -1308,6 +1599,10 @@ if (typeof module !== 'undefined') module.exports = Charts;
       </div>`, { capa: true });
   }
   const b = (t) => `<b>${t}</b>`;
+  const BIO_CATS = ['Nacional', 'Serviço', 'Exportação'];
+  const catsFat = f => f.lista || BIO_CATS; // categorias do cliente (linhas de negócio) ou o padrão indústria
+  const nomeCat = k => k === 'Nacional' ? 'Mercado interno' : k === 'Exportação' ? 'Mercado externo' : k === 'Serviço' ? 'Serviços' : k;
+  const regOrc = () => (M().orc && M().orc.regime === 'caixa') ? 'caixa' : 'competência';
   const iaLinhas = k => (ST.copilot[k] || '').split('\n').map(l => l.trim().replace(/^[-•*]\s*/, '')).filter(Boolean).map(l => `<li class="ia">${esc(l)}</li>`).join('');
   function oprBlocos() {
     const m = M(), r = m.ref, c = cx(), f = m.fat, o = m.orc, bk = m.bancos, y = m.ano;
@@ -1315,16 +1610,16 @@ if (typeof module !== 'undefined') module.exports = Charts;
     const L = { MANCHETE: [], RECEITA: [], CUSTOS_MARGEM: [], RESULTADO: [], CAIXA: [], FOCO: [] };
     // HEADLINE
     if (o && o.n1.ENT) { const a = o.n1.ENT.orc[r], re = o.n1.ENT.real[r], p = pct(re, a); if (p != null) L.MANCHETE.push(`Receita mensal ${p >= 0 ? 'acima' : 'abaixo'} do orçamento ${b('(' + fmtP(p) + ')')}`); }
-    if (f && f.orc.Nacional) {
-      const cand = ['Exportação', 'Nacional', 'Serviço'].map(k => ({ k, re: f.cats[k][y][r], or: f.orc[k][r] })).filter(x => Math.abs(x.or) > 0.5).map(x => ({ ...x, p: pct(x.re, x.or) })).filter(x => x.p != null);
-      cand.sort((a1, a2) => Math.abs(a2.p) - Math.abs(a1.p)).slice(0, 2).forEach(x => L.MANCHETE.push(`${x.k === 'Nacional' ? 'Mercado interno' : x.k === 'Exportação' ? 'Mercado externo' : 'Serviços'}: ${fmtC(x.re)} no mês ${b('(' + fmtP(x.p) + ' vs orçado)')}`));
+    if (f && (f.lista || f.orc.Nacional)) {
+      const cand = catsFat(f).filter(k => f.cats[k] && f.orc[k]).map(k => ({ k, re: f.cats[k][y][r], or: f.orc[k][r] })).filter(x => Math.abs(x.or) > 0.5).map(x => ({ ...x, p: pct(x.re, x.or) })).filter(x => x.p != null);
+      cand.sort((a1, a2) => Math.abs(a2.p) - Math.abs(a1.p)).slice(0, 2).forEach(x => L.MANCHETE.push(`${nomeCat(x.k)}: ${fmtC(x.re)} no mês ${b('(' + fmtP(x.p) + ' vs orçado)')}`));
     }
     if (bk) { const v = bk.total.fim[r] - bk.total.ini[r]; L.MANCHETE.push(`${v >= 0 ? 'Aumento' : 'Redução'} de caixa no mês ${b('(' + fmtP(pct(bk.total.fim[r], bk.total.ini[r])) + ')')}`); }
     // RECEITA
     if (f) {
       const tot = ytd(f.total[y]), totP = py && f.total[py] ? ytd(f.total[py]) : null;
       L.RECEITA.push(`Receita total ${y}: ${b(fmtC(tot))}${totP ? ` (${fmtP(pct(tot, totP))} vs ${py})` : ''}`);
-      [['Nacional', 'Vendas nacionais'], ['Exportação', 'Exportações'], ['Serviço', 'Serviços']].forEach(([k, t]) => {
+      (f.lista ? f.lista.slice().sort((a1, a2) => ytd(f.cats[a2][y]) - ytd(f.cats[a1][y])).slice(0, 3).map(k => [k, k]) : [['Nacional', 'Vendas nacionais'], ['Exportação', 'Exportações'], ['Serviço', 'Serviços']]).forEach(([k, t]) => {
         const v = ytd(f.cats[k][y]), vp = py && f.cats[k][py] ? ytd(f.cats[k][py]) : null;
         if (Math.abs(v) < 0.5 && !vp) return;
         L.RECEITA.push(`${t}: ${b(fmtC(v))}${vp ? ` (${fmtP(pct(v, vp))} vs ${py}${k === 'Serviço' ? `; ${v - vp >= 0 ? '+' : ''}${fmtC(v - vp)}` : ''})` : ''}`);
@@ -1332,7 +1627,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
     }
     // sem aba de faturamento: receita pela competência (vs orçado) e pelos recebimentos do caixa (vs ano anterior)
     if (!f) {
-      if (o && o.n1.ENT) { const re = sumTo(o.n1.ENT.real, r), or = sumTo(o.n1.ENT.orc, r); L.RECEITA.push(`Receita ${y} (competência): ${b(fmtC(re))} (${fmtP(pct(re, or))} vs orçado)`); }
+      if (o && o.n1.ENT) { const re = sumTo(o.n1.ENT.real, r), or = sumTo(o.n1.ENT.orc, r); L.RECEITA.push(`Receita ${y} (${regOrc()}): ${b(fmtC(re))} (${fmtP(pct(re, or))} vs orçado)`); }
       if (c) { const v = ytd(c.n1.ENT.y[y]), vp = py ? ytd(c.n1.ENT.y[py]) : null; L.RECEITA.push(`Recebimentos no caixa: ${b(fmtC(v))}${vp ? ` (${fmtP(pct(v, vp))} vs ${py})` : ''}`); }
     }
     // CUSTOS E MARGEM (DRE – competência)
@@ -1376,7 +1671,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
     const box = (k, ico, t) => `<div class="opr-b"><h4><span>${ico}</span>${esc(t)}</h4>${editavel('opr-' + k, `<ul>${L[k].map(x => `<li>${x}</li>`).join('')}${iaLinhas(k)}${k === 'FOCO' && !ST.copilot.FOCO ? autoFoco().map(x => `<li>${x}</li>`).join('') : ''}</ul>`)}</div>`;
     const corpo = `<div class="opr">
       ${box('MANCHETE', '📌', 'Headline mês')}${box('RECEITA', '💰', 'Receita')}
-      ${box('CUSTOS_MARGEM', '📉', 'Custos e margem (DRE)')}${box('RESULTADO', '📊', 'Resultado')}
+      ${box('CUSTOS_MARGEM', '📉', regOrc() === 'caixa' ? 'Custos e margem (caixa)' : 'Custos e margem (DRE)')}${box('RESULTADO', '📊', 'Resultado')}
       ${box('CAIXA', '💧', 'Caixa')}${box('FOCO', '⚠️', 'Foco diretoria ' + m.ano)}</div>
       ${(() => { const pd = pendencias().filter(x => !/contexto/.test(x)); const ia = (ST.copilot.PENDENCIAS || '').replace(/^[-•*]\s*/gm, '').trim(); const txt = pd.length ? `Análise parcial – documentos ausentes: ${pd.join(', ')}.` : (ia && !/^nenhum/i.test(ia) ? ia : ''); return txt ? `<p class="pend">⚠ ${esc(txt)}</p>` : ''; })()}
       <p class="hint no-print">Textos automáticos a partir dos números; ao aplicar a análise do agente KND, ela entra no lugar. Tudo pode ser editado clicando no texto.</p>`;
@@ -1397,8 +1692,8 @@ if (typeof module !== 'undefined') module.exports = Charts;
     const m = M(), r = m.ref, L = [], o = m.orc, bk = m.bancos;
     if (o && o.n1.ENT) { const a = sumTo(o.n1.ENT.orc, r), re = sumTo(o.n1.ENT.real, r); if (re > a) L.push(`Receita acumulada ${b(fmtP(pct(re, a)))} acima do orçado (${fmtC(re)})`); }
     if (m.fat && m.fat.orc) {
-      const cats = ['Nacional', 'Serviço', 'Exportação'].map(k => ({ k, re: sumTo(m.fat.cats[k][m.ano], r), or: sumTo(m.fat.orc[k] || zeros(12), r) })).filter(x => x.or > 0.5 && x.re > x.or).sort((x, y) => (y.re - y.or) - (x.re - x.or));
-      if (cats[0]) L.push(`${cats[0].k === 'Nacional' ? 'Mercado interno' : cats[0].k}: ${b('+' + fmtC(cats[0].re - cats[0].or))} acima do orçado no ano`);
+      const cats = catsFat(m.fat).filter(k => m.fat.cats[k]).map(k => ({ k, re: sumTo(m.fat.cats[k][m.ano], r), or: sumTo(m.fat.orc[k] || zeros(12), r) })).filter(x => x.or > 0.5 && x.re > x.or).sort((x, y) => (y.re - y.or) - (x.re - x.or));
+      if (cats[0]) L.push(`${nomeCat(cats[0].k)}: ${b('+' + fmtC(cats[0].re - cats[0].or))} acima do orçado no ano`);
     }
     categoriasOrc().filter(x => x.d > ST.materialidade).sort((x, y) => y.d - x.d).slice(0, 2).forEach(x => L.push(`${esc(x.nome)}: ${b(fmtC(x.d))} melhor que o orçado (${fmtP(x.p)})`));
     if (bk) { const va = bk.total.fim[r] - bk.total.ini[0]; if (va > 0) L.push(`Saldo bancário cresceu ${b(fmtC(va))} no ano (${fmtP(pct(bk.total.fim[r], bk.total.ini[0]))})`); }
@@ -1429,13 +1724,17 @@ if (typeof module !== 'undefined') module.exports = Charts;
     const lista = [];
     for (const k of ['VAR', 'FIX', 'FIN', 'PS']) {
       const ls = leaves(c.kids[k] || []);
-      const deltas = ls.map(l => ({ l, d: ytd(l.node.y[y]) - ytd(l.node.y[p]) }));
+      // no financeiro, despesas vêm negativas e receitas positivas: vira "saída" (positiva) e as receitas ficam de fora
+      const sg = k === 'FIN' ? -1 : 1;
+      const deltas = ls.map(l => ({ l, d: sg * (ytd(l.node.y[y]) - ytd(l.node.y[p])) }));
       const fora = new Set();
       deltas.forEach((a, i) => deltas.forEach((bb, j) => { if (j > i && Math.abs(a.d) > 1 && Math.abs(a.d + bb.d) <= Math.abs(a.d) * 0.02) { fora.add(i); fora.add(j); } }));
       deltas.forEach((x, i) => {
         if (fora.has(i) || x.l.node.memo || x.l.node.ajuste || x.l.node.contra) return;
+        const atual = sg * ytd(x.l.node.y[y]), ant = sg * ytd(x.l.node.y[p]);
+        if (k === 'FIN' && atual <= 0 && ant <= 0) return;
         const grupo = x.l.path.length ? x.l.path[x.l.path.length - 1].name : KND.N1NOME[k];
-        lista.push({ k, nome: x.l.node.name, grupo, atual: ytd(x.l.node.y[y]), ant: ytd(x.l.node.y[p]), d: x.d });
+        lista.push({ k, nome: x.l.node.name, grupo, atual, ant, d: x.d });
       });
     }
     lista.sort((a, bb) => bb.d - a.d);
@@ -1466,16 +1765,16 @@ if (typeof module !== 'undefined') module.exports = Charts;
   function sFatTotal() {
     const f = M().fat, ys = f.years;
     const a = serieAnos(y => f.total[y], ys), last = a[a.length - 1], prev = a[a.length - 2];
-    const temOutras = OUTRAS.some(c => anos3(ys).some(y => !isZero(f.cats[c][y])));
+    const temOutras = OUTRAS.some(c => f.cats[c] && anos3(ys).some(y => !isZero(f.cats[c][y])));
     let card2;
     if (temOutras) card2 = `<div class="card"><h4>Sem sucata, imobilizado e aluguel</h4><p class="hint">Serviços + exportação + nacional + mercadorias + ressarcimento − devoluções</p>${Charts.anual(serieAnos(y => f.totalSem[y], ys), { fmt: fmtC })}</div>`;
     else {
-      const cats = ['Nacional', 'Serviço', 'Exportação', 'Ressarcimento', 'Devolução'].filter(c => anos3(ys).some(y => !isZero(f.cats[c][y])));
+      const cats = (f.lista || ['Nacional', 'Serviço', 'Exportação', 'Ressarcimento', 'Devolução']).filter(c => f.cats[c] && anos3(ys).some(y => !isZero(f.cats[c][y])));
       card2 = `<div class="card"><h4>Composição por categoria · acumulado</h4>${Charts.legenda(anos3(ys).map(y => ({ name: String(y), color: corAno(y, anos3(ys)) })))}${Charts.barrasH(cats.map(c => ({ nome: c, vals: anos3(ys).map(y => ytd(f.cats[c][y])) })), anos3(ys).map(y => ({ name: String(y), color: corAno(y, anos3(ys)) })), { w: 500, fmt: fmtC })}</div>`;
     }
     const sub = prev ? `Faturamento acumulado de <b>${fmtC(last.value)}</b>, ${fmtP(pct(last.value, prev.value))} sobre ${prev.label}.` : '';
     return slide('fat-total', 'Faturamento', 'Faturamento total', `<div class="duo">
-      <div class="card"><h4>Com todas as receitas</h4><p class="hint">${temOutras ? 'Serviços + exportação + nacional + mercadorias + sucata + aluguel + imobilizado + ressarcimento − devoluções' : 'Todas as receitas de venda e serviço − devoluções'}</p>${Charts.anual(a, { fmt: fmtC })}</div>${card2}</div>`, { sub });
+      <div class="card"><h4>Com todas as receitas</h4><p class="hint">${temOutras ? 'Serviços + exportação + nacional + mercadorias + sucata + aluguel + imobilizado + ressarcimento − devoluções' : f.lista ? f.lista.join(' + ') : 'Todas as receitas de venda e serviço − devoluções'}</p>${Charts.anual(a, { fmt: fmtC })}</div>${card2}</div>`, { sub });
   }
   function sFatMensal() {
     const f = M().fat, y = f.cur, r = M().ref;
@@ -1484,7 +1783,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
     return slide('fat-mensal', 'Faturamento', `Faturamento mensal · orçado × realizado ${y}`, `<div class="split r">
       <div class="card"><h4>Mês a mês</h4>${grafMesOR(f.orcTotal, f.total[y], { w: 690, h: 300 })}</div>
       <div class="card"><h4>Acumulado</h4>${grafAcumOR(oa, ra, false, { w: 340, h: 300 })}</div></div>`,
-      { sub: `Realizado acumulado de <b>${fmtC(ra)}</b> contra orçamento de ${fmtC(oa)} (${fmtP(pct(ra, oa))}). Em ${MESES[r].toLowerCase()}: ${fmtC(f.total[y][r])} (${fmtP(pct(f.total[y][r], f.orcTotal[r]))} vs orçado).`, tag: `Orçado × realizado · ${y}` });
+      { sub: `Realizado acumulado de <b>${fmtC(ra)}</b> contra orçamento de ${fmtC(oa)} (${fmtP(pct(ra, oa))}). Em ${MESES[r].toLowerCase()}: ${fmtC(f.total[y][r])} (${fmtP(pct(f.total[y][r], f.orcTotal[r]))} vs orçado).${f.metaOrigTotal ? ` Orçado = meta gerencial revisada; a meta original do ano era ${fmtC(sumTo(f.metaOrigTotal, r))} no acumulado (${fmtP(pct(ra, sumTo(f.metaOrigTotal, r)))}).` : ''}`, tag: `Orçado × realizado · ${y}` });
   }
   const CAT_INFO = {
     'Nacional': 'Vendas no mercado interno + mercadorias', 'Serviço': 'Industrialização + PD&I + controle de qualidade',
@@ -1494,12 +1793,13 @@ if (typeof module !== 'undefined') module.exports = Charts;
   function analitico(re) { const f = M().fat; return (f.analiticos || []).find(a => re.test(norm(a.titulo))); }
   function sFatCat(cat, idx) {
     const f = M().fat, ys = anos3(f.years), y = f.cur, r = M().ref;
-    if (ys.every(yy => isZero(f.cats[cat][yy]))) return '';
+    if (!f.cats[cat] || ys.every(yy => isZero(f.cats[cat][yy]))) return '';
     const mm = cat === 'Devolução';
     const a = serieAnos(yy => f.cats[cat][yy], f.years), last = a[a.length - 1], prev = a[a.length - 2];
     const temOrc = f.orc[cat] && !isZero(f.orc[cat]);
     const anal = cat === 'Intercompany' ? analitico(/vendas analitica/) : cat === 'Devolução' ? analitico(/devolucoes analitica/) : null;
-    const nCols = 1 + (temOrc ? 1 : 0) + (anal ? 1 : 0), wc = nCols === 3 ? 340 : nCols === 2 ? 500 : 1000;
+    const dets = (f.detalhe[cat] || []).filter(d => d.ant && (!isZero(d.v) || !isZero(d.ant))), comDet = !!f.lista && dets.length > 1;
+    const nCols = 1 + (temOrc ? 1 : 0) + (anal ? 1 : 0) + (comDet ? 1 : 0), wc = nCols === 3 ? 340 : nCols === 2 ? 500 : 1000;
     let topo = `<div class="card"><h4>Acumulado por ano</h4>${Charts.anual(a, { fmt: fmtC, w: wc, h: 240, menorMelhor: mm })}</div>`;
     if (temOrc) topo += `<div class="card"><h4>Orçado × realizado acumulado ${y}</h4>${grafAcumOR(sumTo(f.orc[cat], r), last.value, mm, { w: wc, h: 240 })}</div>`;
     let baixo;
@@ -1509,13 +1809,18 @@ if (typeof module !== 'undefined') module.exports = Charts;
       topo += `<div class="card"><h4>${esc(cat === 'Intercompany' ? 'Por empresa de destino' : 'Devoluções intercompany')} · acumulado</h4>${(() => { const tt = nomes.reduce((s2, n) => s2 + sumTo(anal.porNome[n], r), 0) || 1; return nomes.map((n, i) => `<div class="kv2"><i class="dot" style="background:${CORES_EMP[i % 4]}"></i>${esc(n)}<small class="sh2">${fmtAV(sumTo(anal.porNome[n], r) / tt)}</small><b>${fmtC(sumTo(anal.porNome[n], r))}</b></div>`).join(''); })()}</div>`;
       if (!temOrc) baixo = `<div class="card"><h4>Mês a mês ${y} · por empresa</h4>${Charts.legenda(sr)}${Charts.empilhado(sr, { w: 1040, h: 230, upTo: r, fmt: fmtC, fmtAxis: v => fmtK(v), totais: fmtK })}</div>`;
     }
+    // linha de negócio com produtos: composição por produto (ano anterior × atual)
+    if (comDet) {
+      const sy = [{ name: String(f.years[f.years.length - 2]), color: corAno(f.years[f.years.length - 2], ys) }, { name: String(y), color: corAno(y, ys) }];
+      topo += `<div class="card"><h4>Por produto · acumulado</h4>${Charts.legenda(sy)}${Charts.barrasH(dets.map(d => ({ nome: d.name, vals: [sumTo(d.ant, r), sumTo(d.v, r)] })), sy, { w: wc, fmt: fmtC })}</div>`;
+    }
     if (!baixo) baixo = temOrc ? `<div class="card"><h4>Mês a mês · orçado × realizado ${y}</h4>${grafMesOR(f.orc[cat], f.cats[cat][y], { h: 220 })}</div>`
       : `<div class="card"><h4>Mês a mês ${y}</h4>${Charts.mensal([{ name: 'Realizado', color: COR_REAL, values: f.cats[cat][y].slice(0, r + 1) }], { w: 1040, h: 220, meses: MES3.slice(0, r + 1), fmt: fmtC, rotulos: fmtK, semEixo: true, padL: 8, bwMax: 44 })}</div>`;
-    const det = f.detalhe[cat].length > 1 ? `<p class="hint">Composição ${y}: ${f.detalhe[cat].map(d => `${esc(d.name)} ${fmtC(ytd(d.v))}`).join(' · ')}</p>` : '';
+    const det = f.detalhe[cat].length > 1 && !f.lista ? `<p class="hint">Composição ${y}: ${f.detalhe[cat].map(d => `${esc(d.name)} ${fmtC(ytd(d.v))}`).join(' · ')}</p>` : '';
     const parte = cat !== 'Intercompany' && cat !== 'Devolução' ? ` · ${fmtAV(last.value / (ytd(f.total[y]) || 1))} do faturamento` : '';
     const n = topo.split('class="card"').length - 1;
-    return slide('fat-cat-' + idx, 'Faturamento', `Faturamento por categoria · ${cat}`, `<div class="cols${n}">${topo}</div>${baixo}${det}`,
-      { sub: `${esc(CAT_INFO[cat] || '')}. Acumulado ${fmtC(last.value)}${prev ? `, ${fmtP(pct(last.value, prev.value))} vs ${prev.label}` : ''}${parte}${temOrc ? `; ${fmtP(pct(last.value, sumTo(f.orc[cat], r)))} vs orçado` : ''}.` });
+    return slide('fat-cat-' + idx, 'Faturamento', f.lista ? `Faturamento · ${cat}` : `Faturamento por categoria · ${cat}`, `<div class="cols${Math.min(n, 3)}">${topo}</div>${baixo}${det}`,
+      { sub: `${CAT_INFO[cat] ? esc(CAT_INFO[cat]) + '. ' : ''}Acumulado ${fmtC(last.value)}${prev ? `, ${fmtP(pct(last.value, prev.value))} vs ${prev.label}` : ''}${parte}${temOrc ? `; ${fmtP(pct(last.value, sumTo(f.orc[cat], r)))} vs orçado` : ''}.` });
   }
   function sBonificacoes() {
     const f = M().fat, r = M().ref, bl = f.blocos.find(x => /bonifica/.test(norm(x.titulo + ' ' + x.sub)));
@@ -1589,7 +1894,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
     const sub = ent ? `Receita de ${MESES[m].toLowerCase()}: <b>${fmtC(ent.real[m])}</b> (${fmtP(pct(ent.real[m], ent.orc[m]))} vs orçado). Acumulado: <b>${fmtC(sumTo(ent.real, m))}</b> (${fmtP(pct(sumTo(ent.real, m), sumTo(ent.orc, m)))}).` : '';
     return slide('orc-geral', 'Orçado × Realizado', 'Orçado × Realizado · visão geral',
       `<table class="tb num drill blk geral"><thead><tr class="g"><th></th><th colspan="4">${MESES[m]}</th><th colspan="5" class="sep">Acumulado jan–${MES3[m].toLowerCase()}</th></tr>
-       <tr><th>DRE (regime de competência)</th><th>Orçado</th><th>Realizado</th><th>Var. %</th><th></th><th class="sep">Orçado</th><th>Realizado</th><th>Var. R$</th><th>Var. %</th><th></th></tr></thead><tbody>${body}</tbody></table>
+       <tr><th>${regOrc() === 'caixa' ? 'Resultado (regime de caixa)' : 'DRE (regime de competência)'}</th><th>Orçado</th><th>Realizado</th><th>Var. %</th><th></th><th class="sep">Orçado</th><th>Realizado</th><th>Var. R$</th><th>Var. %</th><th></th></tr></thead><tbody>${body}</tbody></table>
        <p class="hint">Farol: <i class="fa g"></i> no orçado ou melhor · <i class="fa r"></i> pior que o orçado (FCA). Clique num bloco (›) para abrir o detalhe com todas as contas.</p>`,
       { sub, tag: `Mês e acumulado · ${M().ano}` });
   }
@@ -1632,7 +1937,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
       return `<div class="split r tight"><div class="card"><h4>${t} · mês a mês</h4>${grafMesOR(o.n1[k].orc, o.n1[k].real, { w: 700, h: 210 })}</div>
         <div class="card"><h4>${t} · acumulado</h4>${grafAcumOR(sumTo(o.n1[k].orc, m), sumTo(o.n1[k].real, m), mm, { w: 330, h: 230 })}</div></div>`;
     }).join('');
-    return slide(id, 'Orçado × Realizado', titulo, cards, { sub: 'Regime de competência. À direita: orçado e realizado acumulados e a diferença entre eles.' });
+    return slide(id, 'Orçado × Realizado', titulo, cards, { sub: (regOrc() === 'caixa' ? 'Regime de caixa' : 'Regime de competência') + '. À direita: orçado e realizado acumulados e a diferença entre eles.' });
   }
   function fcaLista() {
     const o = M().orc, m = M().ref, out = [];
@@ -1655,7 +1960,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
       <div class="nota" contenteditable="true" data-fca="${esc(g)}" data-ph="Comentário do gestor (FCA) – clique para escrever">${esc(ST.fca[g] || '')}</div></div>`).join('');
     return slide('fca', 'FCA', 'FCA obrigatório · contas em vermelho no acumulado',
       lista.length ? `<div class="fcagrid">${body}</div>` : '<p>Nenhuma conta em vermelho no acumulado.</p>',
-      { sub: `${lista.length} contas de ${gs.length} gestores realizaram pior que o orçado no acumulado (competência). Ordenadas pelo tamanho do desvio.` });
+      { sub: `${lista.length} contas de ${gs.length} gestores realizaram pior que o orçado no acumulado (${regOrc()}). Ordenadas pelo tamanho do desvio.` });
   }
 
   // ------------------------------------------------------------------ REGIME DE CAIXA
@@ -1702,7 +2007,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
       ${temOrc ? `<div class="card"><h4>Orçado × recebido acumulado ${y}</h4>${grafAcumOR(sumTo(o.n1.ENT.orc, r), l.value, false, { w: 420, h: 240 })}</div>` : ''}</div>`;
     const baixo = temOrc ? `<div class="card"><h4>Mês a mês · orçado × recebido ${y}</h4>${grafMesOR(o.n1.ENT.orc, c.n1.ENT.y[y], { h: 220 })}</div>`
       : `<div class="card"><h4>Mês a mês ${y}</h4>${Charts.mensal([{ name: 'Recebido', color: COR_REAL, values: c.n1.ENT.y[y].slice(0, r + 1) }], { w: 1040, h: 220, meses: MES3.slice(0, r + 1), fmt: fmtC, rotulos: fmtK, semEixo: true, padL: 8 })}</div>`;
-    return slide('cx-receb', 'Regime de caixa', 'Recebimentos', topo + baixo + (temOrc ? '<p class="hint">Orçado: orçamento de receitas (competência), a referência disponível para comparar com o recebido.</p>' : ''),
+    return slide('cx-receb', 'Regime de caixa', 'Recebimentos', topo + baixo + (temOrc ? '<p class="hint">Orçado: orçamento de receitas (${regOrc()}), a referência disponível para comparar com o recebido.</p>' : ''),
       { sub: `Entradas de caixa acumuladas de <b>${fmtC(l.value)}</b>${p ? `, ${fmtP(pct(l.value, p.value))} vs ${p.label}` : ''}.` });
   }
   function sResultados() {
@@ -1781,7 +2086,7 @@ if (typeof module !== 'undefined') module.exports = Charts;
     if (m.caixa) h += sCapa() + sOPR() + sDestaques();
     if (m.fat) {
       h += sFatTotal() + sFatMensal();
-      ['Nacional', 'Serviço', 'Exportação', 'Intercompany', 'Devolução'].forEach((c, i) => { h += sFatCat(c, i); });
+      (m.fat.lista || ['Nacional', 'Serviço', 'Exportação', 'Intercompany', 'Devolução']).forEach((c, i) => { h += sFatCat(c, i); });
       h += sBonificacoes();
     }
     if (m.usd) h += sUSD();
@@ -1841,17 +2146,17 @@ if (typeof module !== 'undefined') module.exports = Charts;
     if (m.fat) {
       const f = m.fat; L.push(`\n[FATURAMENTO ACUMULADO] categoria: ${ys.join(' | ')} | AH`);
       const tl = ys.map(a => ytd(f.total[a])); L.push(`Total: ${tl.map(n).join(' | ')} | ${fmtP(pct(tl[tl.length - 1], tl[tl.length - 2]))}`);
-      ['Nacional', 'Serviço', 'Exportação', 'Devolução', 'Intercompany'].forEach(k => { const v = ys.map(a => ytd(f.cats[k][a] || zeros(12))); if (v.some(x => x)) L.push(`${k}: ${v.map(n).join(' | ')} | ${fmtP(pct(v[v.length - 1], v[v.length - 2]))}`); });
+      (f.lista || ['Nacional', 'Serviço', 'Exportação', 'Devolução', 'Intercompany']).forEach(k => { const v = ys.map(a => ytd((f.cats[k] || {})[a] || zeros(12))); if (v.some(x => x)) L.push(`${k}: ${v.map(n).join(' | ')} | ${fmtP(pct(v[v.length - 1], v[v.length - 2]))}`); });
       L.push(`Faturamento do mês ${MES3[r]}: ${n(f.total[y][r])} (mesmo mês de ${p}: ${n(f.total[p] ? f.total[p][r] : 0)})`);
       if (f.orcTotal) {
         L.push(`\n[FATURAMENTO x ORÇADO] categoria: mês orçado | mês realizado | acum orçado | acum realizado`);
         L.push(`Total: ${n(f.orcTotal[r])} | ${n(f.total[y][r])} | ${n(sumTo(f.orcTotal, r))} | ${n(ytd(f.total[y]))}`);
-        ['Nacional', 'Serviço', 'Exportação', 'Devolução'].forEach(k => { if (f.orc[k] && !isZero(f.orc[k])) L.push(`${k}: ${n(f.orc[k][r])} | ${n(f.cats[k][y][r])} | ${n(sumTo(f.orc[k], r))} | ${n(ytd(f.cats[k][y]))}`); });
+        (f.lista || ['Nacional', 'Serviço', 'Exportação', 'Devolução']).forEach(k => { if (f.orc[k] && !isZero(f.orc[k])) L.push(`${k}: ${n(f.orc[k][r])} | ${n(f.cats[k][y][r])} | ${n(sumTo(f.orc[k], r))} | ${n(ytd(f.cats[k][y]))}`); });
       }
     }
     if (m.usd) L.push(`\n[EXPORTAÇÃO EM US$] acumulado orçado ${fmtUSD(sumTo(m.usd.orc, r))} | realizado ${fmtUSD(sumTo(m.usd.real, r))} | pedidos não faturados ${fmtUSD(m.usd.pedidos.reduce((s, x) => s + (x.valor || 0), 0))}`);
     if (m.orc) {
-      const o = m.orc; L.push(`\n[ORÇADO x REALIZADO ACUMULADO - COMPETÊNCIA] linha: orçado | realizado | var%`);
+      const o = m.orc; L.push(`\n[ORÇADO x REALIZADO ACUMULADO - ${regOrc().toUpperCase()}] linha: orçado | realizado | var%`);
       ['ENT', 'VAR', 'MC', 'FIX', 'ROA', 'RET'].forEach(k => { if (o.n1[k]) { const a = sumTo(o.n1[k].orc, r), b = sumTo(o.n1[k].real, r); L.push(`${KND.N1NOME[k]}: ${n(a)} | ${n(b)} | ${fmtP(pct(b, a))}`); } });
       // ranking das categorias contra o orçado (mês e acumulado)
       const cats = [];
@@ -1958,13 +2263,15 @@ DADOS:
     if (m.ref < 11 && !confirm(`O ano ${c.cur} ainda vai até ${MESES[m.ref]}. Gerar o histórico mesmo assim? (Use isto na virada do ano, com dezembro fechado.)`)) return;
     const head = ['Ano', 'Código', 'Conta', ...MES3];
     const cxRows = [head];
-    Object.keys(m.hist.caixa).map(Number).filter(y => y !== c.cur).sort().forEach(y => m.hist.caixa[y].forEach(r => cxRows.push([y, r.code, r.name, ...r.v])));
-    KND.readDFC(ST.fonte.caixa.grid).forEach(r => cxRows.push([c.cur, r.code, r.name, ...r.v]));
+    const linhas = x => x.tree ? KND.linhasDeArvore(x.tree) : x;
+    const atual = (grid, ler, campo) => KND.isTreasy(grid) ? KND.linhasDeArvore(KND.treasyTree(KND.treasyRows(grid), t => t[campo])) : ler(grid);
+    Object.keys(m.hist.caixa).map(Number).filter(y => y !== c.cur).sort().forEach(y => linhas(m.hist.caixa[y]).forEach(r => cxRows.push([y, r.code, r.name, ...r.v])));
+    atual(ST.fonte.caixa.grid, KND.readDFC, 'real').forEach(r => cxRows.push([c.cur, r.code, r.name, ...r.v]));
     const fRows = [['Ano', 'Categoria', ...MES3]];
     if (m.fat) m.fat.years.forEach(y => Object.keys(m.fat.cats).forEach(k => fRows.push([y, k, ...m.fat.cats[k][y]])));
     const cRows = [head];
-    Object.keys(m.hist.comp || {}).map(Number).filter(y => y !== c.cur).sort().forEach(y => m.hist.comp[y].forEach(r => cRows.push([y, r.code, r.name, ...r.v])));
-    if (ST.fonte.competencia) KND.readCompetencia(ST.fonte.competencia.grid).forEach(r => cRows.push([c.cur, r.code, r.name, ...r.v.slice(12)]));
+    Object.keys(m.hist.comp || {}).map(Number).filter(y => y !== c.cur).sort().forEach(y => linhas(m.hist.comp[y]).forEach(r => cRows.push([y, r.code, r.name, ...r.v])));
+    if (ST.fonte.competencia) atual(ST.fonte.competencia.grid, g => KND.readCompetencia(g).map(r => ({ ...r, v: r.v.slice(12) })), 'real').forEach(r => cRows.push([c.cur, r.code, r.name, ...r.v]));
     const cfg = [['Chave', 'Valor'], ['Cliente', m.cliente || ''], ['Perfil', m.perfil || 'Indústria'], ['Versão do formato', 1]];
     const sheets = [['KND_Config', cfg], ['KND_Caixa', cxRows], ['KND_Faturamento', fRows], ['KND_Competencia', cRows]];
     const files = [
@@ -1981,7 +2288,7 @@ DADOS:
   // ------------------------------------------------------------------ eventos
   const lerImagem = f => new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f); });
   async function processar(files) {
-    const imgs = files.filter(f => /\.(png|jpe?g|svg|webp|gif)$/i.test(f.name)), planilhas = files.filter(f => /\.xls[xm]$/i.test(f.name));
+    const imgs = files.filter(f => /\.(png|jpe?g|svg|webp|gif)$/i.test(f.name)), planilhas = files.filter(f => /\.xls[xm]?$/i.test(f.name));
     if (imgs.length) {
       const novos = [];
       for (const f of imgs.sort((a, b2) => a.name.localeCompare(b2.name))) {
@@ -2007,7 +2314,7 @@ DADOS:
       `<div class="st ${ST.logos.cliente.length ? 'ok' : 'no'}"><b>${ST.logos.cliente.length ? '✓' : '–'} Logomarcas do cliente</b><small>${ST.logos.cliente.length ? ST.logos.cliente.map(l => esc(l.nome)).join(', ') : 'solte arquivos .png/.jpg junto (nome com "knd" = logo KND)'}</small></div>` +
       (m.caixa && m.caixa.avisos.length ? `<div class="st warn"><b>⚠ Conferência</b>${m.caixa.avisos.map(a => `<small>${esc(a)}</small>`).join('')}</div>` : '') +
       (erros.length ? `<div class="st warn"><b>⚠ Não consegui ler</b>${erros.map(a => `<small>${esc(a)}</small>`).join('')}</div>` : '');
-    if (!m.caixa && !m.fat && !m.orc) { $('#deck').innerHTML = '<p class="vazio">Nenhuma das quatro fontes (DFC, competência, faturamento, bancos) foi reconhecida.</p>'; return; }
+    if (!m.caixa && !m.fat && !m.orc) { $('#deck').innerHTML = (m.bancos ? '<p class="vazio">Saldos bancários lidos ✓. Para montar os slides, solte junto o DFC/caixa, o orçado × realizado ou o faturamento do mês.</p>' : '<p class="vazio">Nenhuma das quatro fontes (DFC, competência, faturamento, bancos) foi reconhecida.</p>'); return; }
     ST.aberto.clear(); ST.fechado.clear(); ST.edit = {};
     if (m.orc) ['mes', 'acum'].forEach(md => Object.keys(m.orc.n1).forEach(k => ST.aberto.add('orc' + k + md)));
     document.body.classList.add('pronto');
@@ -2062,7 +2369,7 @@ DADOS:
     inp.addEventListener('change', () => inp.files.length && processar([...inp.files]));
     ['dragover', 'dragenter'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
     ['dragleave', 'drop'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); if (ev === 'drop' || e.target === dz) dz.classList.remove('over'); }));
-    document.addEventListener('drop', e => { const f = [...e.dataTransfer.files].filter(x => /\.(xls[xm]|png|jpe?g|svg|webp|gif)$/i.test(x.name)); if (f.length) processar(f); });
+    document.addEventListener('drop', e => { const f = [...e.dataTransfer.files].filter(x => /\.(xls[xm]?|png|jpe?g|svg|webp|gif)$/i.test(x.name)); if (f.length) processar(f); });
     document.addEventListener('click', e => {
       if (e.target.closest('[contenteditable]')) return;
       const ab = e.target.closest('[data-abrir],[data-fechar],[data-abrir-orc],[data-fechar-orc]');
